@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections import defaultdict
 
-from vibee_hacker.core.models import Target, Result
+from vibee_hacker.core.models import Target, Result, InterPhaseContext
 from vibee_hacker.core.plugin_base import PluginBase
 
 logger = logging.getLogger(__name__)
@@ -33,30 +33,31 @@ class ScanEngine:
         for p in applicable:
             by_phase[p.phase].append(p)
 
+        context = InterPhaseContext()
         all_results: list[Result] = []
         for phase_num in sorted(by_phase.keys()):
             phase_plugins = by_phase[phase_num]
-            results = await self._run_phase(target, phase_plugins)
+            results = await self._run_phase(target, phase_plugins, context)
             all_results.extend(results)
 
         all_results.sort(key=lambda r: r.base_severity, reverse=True)
         return all_results
 
     async def _run_phase(
-        self, target: Target, plugins: list[PluginBase]
+        self, target: Target, plugins: list[PluginBase], context: InterPhaseContext | None = None
     ) -> list[Result]:
         tasks = [
-            self._run_plugin_safe(plugin, target) for plugin in plugins
+            self._run_plugin_safe(plugin, target, context) for plugin in plugins
         ]
         results_nested = await asyncio.gather(*tasks)
         return [r for sublist in results_nested for r in sublist]
 
     async def _run_plugin_safe(
-        self, plugin: PluginBase, target: Target
+        self, plugin: PluginBase, target: Target, context: InterPhaseContext | None = None
     ) -> list[Result]:
         try:
             results = await asyncio.wait_for(
-                plugin.run(target, context=None), timeout=self._timeout
+                plugin.run(target, context=context), timeout=self._timeout
             )
             return results
         except asyncio.TimeoutError:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 
 import click
@@ -61,9 +60,9 @@ def scan(target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet):
     results = asyncio.run(engine.scan(t, phases=phases, plugins=plugin_names))
 
     if output:
-        data = [r.to_dict() for r in results]
-        with open(output, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        from vibee_hacker.reports.json_report import JsonReporter
+        reporter = JsonReporter()
+        reporter.generate(results, t, output)
         if not quiet:
             console.print(f"[green]Results saved to {output}[/green]")
 

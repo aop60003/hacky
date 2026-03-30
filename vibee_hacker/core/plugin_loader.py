@@ -5,10 +5,13 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import inspect
+import logging
 import sys
 from pathlib import Path
 
 from vibee_hacker.core.plugin_base import PluginBase
+
+logger = logging.getLogger(__name__)
 
 
 class PluginLoader:
@@ -69,7 +72,8 @@ class PluginLoader:
         sys.modules[module_name] = module
         try:
             spec.loader.exec_module(module)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load plugin from %s: %s", path, e)
             return []
 
         found = []

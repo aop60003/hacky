@@ -14,8 +14,15 @@ class PluginBase(abc.ABC):
     category: str = ""
     phase: int = 0
     base_severity: Severity = Severity.INFO
-    requires: list[str] = []
-    provides: list[str] = []
+    requires: list[str]
+    provides: list[str]
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "requires" not in cls.__dict__:
+            cls.requires = []
+        if "provides" not in cls.__dict__:
+            cls.provides = []
     detection_criteria: str = ""
     expected_evidence: str = ""
     destructive_level: int = 0
