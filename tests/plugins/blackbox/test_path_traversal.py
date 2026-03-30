@@ -1,5 +1,6 @@
 # tests/plugins/blackbox/test_path_traversal.py
 import pytest
+import httpx
 from vibee_hacker.plugins.blackbox.path_traversal import PathTraversalPlugin
 from vibee_hacker.core.models import Target, Severity
 
@@ -35,3 +36,10 @@ class TestPathTraversal:
         httpx_mock.add_response(text="File not found")
         results = await plugin.run(target)
         assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_transport_error_returns_empty(self, plugin, httpx_mock):
+        target = Target(url="https://down.example.com/page?q=test")
+        httpx_mock.add_exception(httpx.ConnectError("connection refused"))
+        results = await plugin.run(target)
+        assert results == []
