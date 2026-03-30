@@ -23,6 +23,7 @@ class PluginBase(abc.ABC):
             cls.requires = []
         if "provides" not in cls.__dict__:
             cls.provides = []
+
     detection_criteria: str = ""
     expected_evidence: str = ""
     destructive_level: int = 0
