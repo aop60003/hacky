@@ -48,8 +48,8 @@ class ScanEngine:
     async def _run_phase(
         self, target: Target, plugins: list[PluginBase], context: InterPhaseContext | None = None
     ) -> list[Result]:
-        # Give each plugin a shallow copy of context to prevent cross-pollution within a phase
-        plugin_contexts = [copy.copy(context) if context else None for _ in plugins]
+        # Give each plugin a deep copy of context to prevent cross-pollution within a phase
+        plugin_contexts = [copy.deepcopy(context) if context else None for _ in plugins]
         tasks = [
             self._run_plugin_safe(plugin, target, ctx)
             for plugin, ctx in zip(plugins, plugin_contexts)
@@ -67,15 +67,21 @@ class ScanEngine:
     @staticmethod
     def _merge_context(target_ctx: InterPhaseContext, source_ctx: InterPhaseContext) -> None:
         """Merge plugin's context discoveries back into the shared context."""
+        existing_tech = set(target_ctx.tech_stack)
         for item in source_ctx.tech_stack:
-            if item not in target_ctx.tech_stack:
+            if item not in existing_tech:
                 target_ctx.tech_stack.append(item)
+                existing_tech.add(item)
+        existing_ssrf = set(target_ctx.ssrf_endpoints)
         for item in source_ctx.ssrf_endpoints:
-            if item not in target_ctx.ssrf_endpoints:
+            if item not in existing_ssrf:
                 target_ctx.ssrf_endpoints.append(item)
+                existing_ssrf.add(item)
+        existing_cnames = set(target_ctx.dangling_cnames)
         for item in source_ctx.dangling_cnames:
-            if item not in target_ctx.dangling_cnames:
+            if item not in existing_cnames:
                 target_ctx.dangling_cnames.append(item)
+                existing_cnames.add(item)
         if source_ctx.waf_info and not target_ctx.waf_info:
             target_ctx.waf_info = source_ctx.waf_info
         if source_ctx.waf_bypass_payloads and not target_ctx.waf_bypass_payloads:

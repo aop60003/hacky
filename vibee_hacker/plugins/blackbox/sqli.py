@@ -46,6 +46,10 @@ class SqliPlugin(PluginBase):
         if not params:
             return []
 
+        MAX_PARAMS = 10
+        if len(params) > MAX_PARAMS:
+            params = dict(list(params.items())[:MAX_PARAMS])
+
         results = []
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             # Fetch baseline response to compare against
@@ -67,6 +71,9 @@ class SqliPlugin(PluginBase):
                     try:
                         resp = await client.get(test_url)
                     except httpx.TransportError:
+                        continue
+
+                    if len(resp.text) > 1_000_000:  # 1MB max response
                         continue
 
                     for pattern in SQL_ERROR_PATTERNS:
