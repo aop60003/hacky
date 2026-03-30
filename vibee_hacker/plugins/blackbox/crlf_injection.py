@@ -41,7 +41,12 @@ class CrlfInjectionPlugin(PluginBase):
                 injected_value = original_value + CRLF_PAYLOAD
                 test_params = {k: v[0] for k, v in params.items()}
                 test_params[param_name] = injected_value
-                test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+                # Build the query string manually to avoid double-encoding the CRLF payload.
+                # urlencode would percent-encode the already-encoded %0d%0a sequences, preventing detection.
+                encoded_parts = urlencode({k: v for k, v in test_params.items() if k != param_name})
+                param_fragment = f"{param_name}={injected_value}"
+                raw_query = (encoded_parts + "&" + param_fragment) if encoded_parts else param_fragment
+                test_url = urlunparse(parsed._replace(query=raw_query))
 
                 try:
                     resp = await client.get(test_url)

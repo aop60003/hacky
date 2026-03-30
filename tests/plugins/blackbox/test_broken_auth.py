@@ -18,7 +18,7 @@ class TestBrokenAuth:
     @pytest.mark.asyncio
     async def test_no_auth_returns_200_with_data(self, plugin, target, httpx_mock):
         """200 response with substantial body without auth is reported as CRITICAL."""
-        body = '{"user": "admin", "email": "admin@example.com", "role": "administrator", "data": "sensitive information here"}'
+        body = '{"user": "admin", "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret", "role": "administrator", "data": "sensitive information here"}'
         httpx_mock.add_response(
             status_code=200,
             text=body,

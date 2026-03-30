@@ -23,11 +23,6 @@ SENSITIVE_PATTERNS = [
         "Korean resident registration number (주민번호)",
     ),
     (
-        re.compile(r"AKIA[0-9A-Z]{16}"),
-        "aws_key",
-        "AWS access key",
-    ),
-    (
         re.compile(r"-----BEGIN (?:RSA )?PRIVATE KEY-----"),
         "private_key",
         "Private key material",

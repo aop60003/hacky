@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 
 import httpx
@@ -11,6 +12,11 @@ from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
 from vibee_hacker.core.plugin_base import PluginBase
 
 MIN_BODY_LENGTH = 100  # bytes threshold for "substantial body"
+
+# Only flag responses that contain actual sensitive data to avoid FP on public endpoints
+SENSITIVE_DATA_RE = re.compile(
+    r'"(password|token|secret|ssn|credit_card|api_key|private_key)"\s*:\s*"[^"]+"'
+)
 
 AUTH_PROBES = [
     ("no_token", {}),
@@ -41,7 +47,11 @@ class BrokenAuthPlugin(PluginBase):
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                     return []
 
-                if resp.status_code == 200 and len(resp.text) > MIN_BODY_LENGTH:
+                if (
+                    resp.status_code == 200
+                    and len(resp.text) > MIN_BODY_LENGTH
+                    and SENSITIVE_DATA_RE.search(resp.text)
+                ):
                     probe_label = {
                         "no_token": "no Authorization header",
                         "empty_bearer": "empty Bearer token",

@@ -30,12 +30,12 @@ class TestSensitiveData:
         assert "sensitive_data_" in results[0].rule_id
 
     @pytest.mark.asyncio
-    async def test_aws_key_in_response(self, plugin, target, httpx_mock):
-        """AWS access key in response body is reported as HIGH."""
+    async def test_private_key_in_response(self, plugin, target, httpx_mock):
+        """Private key material in response body is reported as HIGH."""
         httpx_mock.add_response(
             url="https://example.com/page",
             status_code=200,
-            text="AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE configuration leaked",
+            text="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
         )
         results = await plugin.run(target)
         assert len(results) >= 1

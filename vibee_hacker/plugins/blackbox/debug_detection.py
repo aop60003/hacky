@@ -24,7 +24,9 @@ DEBUG_PATHS = [
 DEBUG_PATTERNS = [
     re.compile(r"Traceback", re.I),
     re.compile(r"Django Debug", re.I),
-    re.compile(r"Laravel", re.I),
+    re.compile(r"Laravel.*(?:Error|Exception|Debug)", re.I),
+    re.compile(r"Ignition", re.I),
+    re.compile(r"DebugBar", re.I),
     re.compile(r"stack trace", re.I),
     re.compile(r"SQLSTATE", re.I),
     re.compile(r"Exception in thread", re.I),
@@ -62,7 +64,7 @@ class DebugDetectionPlugin(PluginBase):
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                     continue
 
-                if resp.status_code == 404:
+                if resp.status_code not in (200, 500):
                     continue
 
                 if len(resp.text) > 1_000_000:

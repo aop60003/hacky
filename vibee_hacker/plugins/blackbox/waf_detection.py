@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shlex
+from urllib.parse import quote
 
 import httpx
 
@@ -70,7 +71,7 @@ class WafDetectionPlugin(PluginBase):
 
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10, follow_redirects=False) as client:
             for payload in PAYLOADS:
-                probe_url = target.url.rstrip("/") + "/?waf_probe=" + payload
+                probe_url = target.url.rstrip("/") + "/?waf_probe=" + quote(payload)
                 try:
                     resp = await client.get(probe_url)
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
