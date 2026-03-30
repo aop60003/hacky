@@ -33,7 +33,7 @@ def cli():
 @click.option("--plugin", type=str, help="Comma-separated plugin names")
 @click.option("--output", "-o", type=click.Path(), help="Output file path")
 @click.option(
-    "--format", "fmt", default="json", type=click.Choice(["json", "html", "sarif"])
+    "--format", "fmt", default="json", type=click.Choice(["json"])
 )
 @click.option("--timeout", default=60, type=int, help="Per-plugin timeout (seconds)")
 @click.option(

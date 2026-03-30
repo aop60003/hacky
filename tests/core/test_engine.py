@@ -88,3 +88,24 @@ class TestScanEngine:
         assert len(results) >= 1
         passed = [r for r in results if r.plugin_name == "passive_test"]
         assert len(passed) == 1
+
+    @pytest.mark.asyncio
+    async def test_plugin_timeout_isolated(self, target):
+        import asyncio as _asyncio
+
+        class SlowPlugin(PluginBase):
+            name = "slow_test"
+            category = "blackbox"
+            phase = 2
+            base_severity = Severity.LOW
+
+            async def run(self, target, context=None):
+                await _asyncio.sleep(10)
+                return []
+
+        engine = ScanEngine(timeout_per_plugin=1)
+        engine.register_plugin(SlowPlugin())
+        results = await engine.scan(target)
+        assert len(results) == 1
+        assert results[0].plugin_status == "failed"
+        assert "timed out" in results[0].description

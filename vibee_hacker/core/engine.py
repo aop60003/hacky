@@ -48,13 +48,40 @@ class ScanEngine:
     async def _run_phase(
         self, target: Target, plugins: list[PluginBase], context: InterPhaseContext | None = None
     ) -> list[Result]:
-        # Give each plugin a shallow copy of context to prevent cross-pollution
+        # Give each plugin a shallow copy of context to prevent cross-pollution within a phase
+        plugin_contexts = [copy.copy(context) if context else None for _ in plugins]
         tasks = [
-            self._run_plugin_safe(plugin, target, copy.copy(context) if context else None)
-            for plugin in plugins
+            self._run_plugin_safe(plugin, target, ctx)
+            for plugin, ctx in zip(plugins, plugin_contexts)
         ]
         results_nested = await asyncio.gather(*tasks)
+
+        # Merge plugin-discovered data back into the shared context for next phase
+        if context is not None:
+            for ctx in plugin_contexts:
+                if ctx is not None:
+                    self._merge_context(context, ctx)
+
         return [r for sublist in results_nested for r in sublist]
+
+    @staticmethod
+    def _merge_context(target_ctx: InterPhaseContext, source_ctx: InterPhaseContext) -> None:
+        """Merge plugin's context discoveries back into the shared context."""
+        for item in source_ctx.tech_stack:
+            if item not in target_ctx.tech_stack:
+                target_ctx.tech_stack.append(item)
+        for item in source_ctx.ssrf_endpoints:
+            if item not in target_ctx.ssrf_endpoints:
+                target_ctx.ssrf_endpoints.append(item)
+        for item in source_ctx.dangling_cnames:
+            if item not in target_ctx.dangling_cnames:
+                target_ctx.dangling_cnames.append(item)
+        if source_ctx.waf_info and not target_ctx.waf_info:
+            target_ctx.waf_info = source_ctx.waf_info
+        if source_ctx.waf_bypass_payloads and not target_ctx.waf_bypass_payloads:
+            target_ctx.waf_bypass_payloads = source_ctx.waf_bypass_payloads
+        if source_ctx.discovered_api_schema and not target_ctx.discovered_api_schema:
+            target_ctx.discovered_api_schema = source_ctx.discovered_api_schema
 
     async def _run_plugin_safe(
         self, plugin: PluginBase, target: Target, context: InterPhaseContext | None = None
