@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import httpx
@@ -46,7 +47,7 @@ class SqliPlugin(PluginBase):
             return []
 
         results = []
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             # Fetch baseline response to compare against
             try:
                 await client.get(target.url)
@@ -76,7 +77,7 @@ class SqliPlugin(PluginBase):
                                 cwe_id="CWE-89",
                                 endpoint=target.url,
                                 param_name=param_name,
-                                curl_command=f"curl '{test_url}'",
+                                curl_command=f"curl {shlex.quote(test_url)}",
                                 rule_id="sqli_error_based",
                             ))
                             return results  # Stop on first confirmed finding

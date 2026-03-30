@@ -14,6 +14,7 @@ class TestXss:
         target = Target(url="https://example.com/search?q=test")
         httpx_mock.add_response(
             url="https://example.com/search?q=%3Cscript%3Ealert%28%27vbh%27%29%3C%2Fscript%3E",
+            headers={"content-type": "text/html; charset=utf-8"},
             text="<html>Results for <script>alert('vbh')</script></html>",
         )
         results = await plugin.run(target)

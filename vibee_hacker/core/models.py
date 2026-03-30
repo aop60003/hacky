@@ -26,6 +26,7 @@ class Target:
     url: str | None = None
     path: str | None = None
     mode: str = "blackbox"
+    verify_ssl: bool = True
 
     @property
     def host(self) -> str | None:

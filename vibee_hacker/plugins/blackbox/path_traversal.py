@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import httpx
@@ -44,7 +45,7 @@ class PathTraversalPlugin(PluginBase):
             return []
 
         results = []
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             # Fetch baseline response
             try:
                 await client.get(target.url)
@@ -73,7 +74,7 @@ class PathTraversalPlugin(PluginBase):
                                 cwe_id="CWE-22",
                                 endpoint=target.url,
                                 param_name=param_name,
-                                curl_command=f"curl '{test_url}'",
+                                curl_command=f"curl {shlex.quote(test_url)}",
                                 rule_id="path_traversal_lfi",
                             ))
                             return results

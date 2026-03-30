@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import httpx
@@ -36,7 +37,7 @@ class XssPlugin(PluginBase):
             return []
 
         results = []
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             for param_name in params:
                 for payload in XSS_PAYLOADS:
                     test_params = {k: v[0] for k, v in params.items()}
@@ -46,6 +47,10 @@ class XssPlugin(PluginBase):
                     try:
                         resp = await client.get(test_url)
                     except httpx.HTTPError:
+                        continue
+
+                    content_type = resp.headers.get("content-type", "")
+                    if "text/html" not in content_type:
                         continue
 
                     if payload in resp.text:
@@ -58,7 +63,7 @@ class XssPlugin(PluginBase):
                             cwe_id="CWE-79",
                             endpoint=target.url,
                             param_name=param_name,
-                            curl_command=f"curl '{test_url}'",
+                            curl_command=f"curl {shlex.quote(test_url)}",
                             rule_id="xss_reflected",
                         ))
                         return results

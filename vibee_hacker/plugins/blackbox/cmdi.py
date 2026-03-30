@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import httpx
@@ -39,10 +40,12 @@ class CmdiPlugin(PluginBase):
             return []
 
         results = []
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
-            # Fetch baseline response
+        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
+            # Fetch baseline response and abort if MARKER already present
             try:
-                await client.get(target.url)
+                baseline_resp = await client.get(target.url)
+                if MARKER in baseline_resp.text:
+                    return []
             except httpx.HTTPError:
                 return []
 
@@ -68,7 +71,7 @@ class CmdiPlugin(PluginBase):
                             cwe_id="CWE-78",
                             endpoint=target.url,
                             param_name=param_name,
-                            curl_command=f"curl '{test_url}'",
+                            curl_command=f"curl {shlex.quote(test_url)}",
                             rule_id="cmdi_output_based",
                         ))
                         return results
