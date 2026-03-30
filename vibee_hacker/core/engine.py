@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from collections import defaultdict
 
@@ -15,9 +16,10 @@ logger = logging.getLogger(__name__)
 class ScanEngine:
     """Core scan engine that manages plugin lifecycle."""
 
-    def __init__(self, timeout_per_plugin: int = 60):
+    def __init__(self, timeout_per_plugin: int = 60, max_concurrency: int = 10):
         self._plugins: list[PluginBase] = []
         self._timeout = timeout_per_plugin
+        self._semaphore = asyncio.Semaphore(max_concurrency)
 
     def register_plugin(self, plugin: PluginBase) -> None:
         self._plugins.append(plugin)
@@ -46,8 +48,10 @@ class ScanEngine:
     async def _run_phase(
         self, target: Target, plugins: list[PluginBase], context: InterPhaseContext | None = None
     ) -> list[Result]:
+        # Give each plugin a shallow copy of context to prevent cross-pollution
         tasks = [
-            self._run_plugin_safe(plugin, target, context) for plugin in plugins
+            self._run_plugin_safe(plugin, target, copy.copy(context) if context else None)
+            for plugin in plugins
         ]
         results_nested = await asyncio.gather(*tasks)
         return [r for sublist in results_nested for r in sublist]
@@ -55,17 +59,18 @@ class ScanEngine:
     async def _run_plugin_safe(
         self, plugin: PluginBase, target: Target, context: InterPhaseContext | None = None
     ) -> list[Result]:
-        try:
-            results = await asyncio.wait_for(
-                plugin.run(target, context=context), timeout=self._timeout
-            )
-            return results
-        except asyncio.TimeoutError:
-            logger.warning("Plugin %s timed out", plugin.name)
-            return [self._make_error_result(plugin, "Plugin timed out")]
-        except Exception as e:
-            logger.warning("Plugin %s failed: %s", plugin.name, e)
-            return [self._make_error_result(plugin, f"Plugin error: {e}")]
+        async with self._semaphore:
+            try:
+                results = await asyncio.wait_for(
+                    plugin.run(target, context=context), timeout=self._timeout
+                )
+                return results
+            except asyncio.TimeoutError:
+                logger.warning("Plugin %s timed out", plugin.name)
+                return [self._make_error_result(plugin, "Plugin timed out")]
+            except Exception as e:
+                logger.warning("Plugin %s failed: %s", plugin.name, e)
+                return [self._make_error_result(plugin, f"Plugin error: {e}")]
 
     def _filter_plugins(
         self,

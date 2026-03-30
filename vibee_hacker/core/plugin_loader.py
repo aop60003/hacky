@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 class PluginLoader:
     """Discovers and manages plugins."""
 
-    def __init__(self):
+    def __init__(self, allowed_dirs: list[str] | None = None):
         self._plugins: list[PluginBase] = []
+        self._allowed_dirs: list[Path] = [Path(d).resolve() for d in allowed_dirs] if allowed_dirs else []
 
     @property
     def plugins(self) -> list[PluginBase]:
@@ -26,8 +27,14 @@ class PluginLoader:
 
     def discover(self, directory: str) -> list[PluginBase]:
         found = []
-        dir_path = Path(directory)
+        dir_path = Path(directory).resolve()
         if not dir_path.is_dir():
+            return found
+
+        if self._allowed_dirs and not any(
+            dir_path == ad or dir_path.is_relative_to(ad) for ad in self._allowed_dirs
+        ):
+            logger.warning("Plugin directory %s is outside allowed paths, skipping", dir_path)
             return found
 
         for py_file in dir_path.glob("*.py"):
