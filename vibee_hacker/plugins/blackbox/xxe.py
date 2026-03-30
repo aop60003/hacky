@@ -32,12 +32,13 @@ DETECTION_PATTERNS = [
     "[fonts]",              # Windows win.ini content
     "[extensions]",
     "for 16-bit app support",
-    # XML parser error leakage patterns
-    "DOCTYPE",
-    "ENTITY",
+    # XML parser error leakage patterns (context-specific to reduce FP)
+    "DOCTYPE is not allowed",
+    "ENTITY was referenced",
     "XML parser error",
-    "XML declaration",
-    "not well-formed",
+    "XML declaration not well-formed",
+    "not well-formed (invalid token)",
+    "External entity",
 ]
 
 
