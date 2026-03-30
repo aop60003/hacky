@@ -30,7 +30,12 @@ class TestXxe:
 
     @pytest.mark.asyncio
     async def test_no_xxe(self, plugin, target, httpx_mock):
-        # Normal error response — no file content
+        # Normal error response for both Linux and Windows payloads — no file content
+        httpx_mock.add_response(
+            url="https://example.com/api/data",
+            text="<error>Invalid XML</error>",
+            status_code=400,
+        )
         httpx_mock.add_response(
             url="https://example.com/api/data",
             text="<error>Invalid XML</error>",

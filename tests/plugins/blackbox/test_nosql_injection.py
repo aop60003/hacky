@@ -16,7 +16,7 @@ class TestNoSqlInjection:
 
     @pytest.mark.asyncio
     async def test_nosql_detected(self, plugin, target, httpx_mock):
-        # Baseline GET returns one response
+        # Baseline POST with original body returns one response
         httpx_mock.add_response(
             url="https://example.com/api/login?username=admin",
             text='{"error":"invalid credentials"}',

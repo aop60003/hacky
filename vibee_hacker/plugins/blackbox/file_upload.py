@@ -113,7 +113,7 @@ class FileUploadPlugin(PluginBase):
                 if pattern.search(upload_resp.text):
                     curl_cmd = (
                         f"curl -X POST {shlex.quote(action_url)} "
-                        f"-F '{field_name}=@{UPLOAD_FILENAME};type={UPLOAD_CONTENT_TYPE}'"
+                        f"-F {shlex.quote(field_name + '=@' + UPLOAD_FILENAME + ';type=' + UPLOAD_CONTENT_TYPE)}"
                     )
                     return [Result(
                         plugin_name=self.name,

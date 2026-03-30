@@ -16,14 +16,14 @@ class TestSsti:
 
     @pytest.mark.asyncio
     async def test_ssti_detected(self, plugin, target, httpx_mock):
-        # Baseline does NOT contain 49
+        # Baseline does NOT contain 50337
         httpx_mock.add_response(
             url="https://example.com/search?q=test",
             text="<html>Hello test</html>",
         )
-        # First payload {{7*7}} reflected as 49
+        # First payload {{7*7191}} reflected as 50337
         httpx_mock.add_response(
-            text="<html>Result: 49</html>",
+            text="<html>Result: 50337</html>",
         )
         results = await plugin.run(target)
         assert len(results) >= 1
@@ -33,23 +33,23 @@ class TestSsti:
 
     @pytest.mark.asyncio
     async def test_no_ssti(self, plugin, target, httpx_mock):
-        # Baseline and all payloads return normal page without 49
-        # 1 baseline + 5 payloads = 6 requests total for 1 param
+        # Baseline and all payloads return normal page without 50337
+        # 1 baseline + 4 payloads = 5 requests total for 1 param
         httpx_mock.add_response(text="<html>Normal page</html>")
-        for _ in range(5):
+        for _ in range(4):
             httpx_mock.add_response(text="<html>Normal page</html>")
         results = await plugin.run(target)
         assert len(results) == 0
 
     @pytest.mark.asyncio
-    async def test_baseline_has_49(self, plugin, target, httpx_mock):
-        # Baseline already contains 49 — should NOT report
+    async def test_baseline_has_50337(self, plugin, target, httpx_mock):
+        # Baseline already contains 50337 — should NOT report
         httpx_mock.add_response(
             url="https://example.com/search?q=test",
-            text="<html>Score: 49 points</html>",
+            text="<html>Score: 50337 points</html>",
         )
-        # Payloads also return 49 but baseline already had it
-        for _ in range(5):
-            httpx_mock.add_response(text="<html>Score: 49 points reflected</html>")
+        # Payloads also return 50337 but baseline already had it
+        for _ in range(4):
+            httpx_mock.add_response(text="<html>Score: 50337 points reflected</html>")
         results = await plugin.run(target)
         assert len(results) == 0

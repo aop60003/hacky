@@ -56,7 +56,7 @@ class IdorCheckPlugin(PluginBase):
     description = "BOLA/IDOR detection — adjacent numeric ID enumeration"
     category = "blackbox"
     phase = 3
-    base_severity = Severity.CRITICAL
+    base_severity = Severity.HIGH
     detection_criteria = "Adjacent ID returns 200 with different non-empty body"
     expected_evidence = "Different valid response for modified numeric ID in URL"
 
@@ -128,7 +128,8 @@ class IdorCheckPlugin(PluginBase):
                         description=(
                             f"Modifying the numeric ID in the URL ({label}) returned a "
                             f"different valid 200 response. This indicates the server does "
-                            f"not properly enforce access controls on object references."
+                            f"not properly enforce access controls on object references. "
+                            f"(Manual verification required - may be a public endpoint)"
                         ),
                         evidence=(
                             f"Original URL: {target.url} → status {baseline_status}\n"

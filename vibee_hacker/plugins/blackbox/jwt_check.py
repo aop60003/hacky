@@ -34,14 +34,19 @@ def _b64_decode(segment: str) -> dict | None:
         return None
 
 
-def _extract_jwts(text: str, headers: dict) -> list[str]:
+def _extract_jwts(text: str, headers) -> list[str]:
     """Find JWT strings in response headers and body."""
     tokens: list[str] = []
-    # Check Authorization and Set-Cookie headers
-    for header_name in ("authorization", "set-cookie"):
-        value = headers.get(header_name, "")
-        for match in JWT_PATTERN.finditer(value):
-            tokens.append(match.group())
+    # Check all header values, handling multiple Set-Cookie headers via multi_items()
+    try:
+        all_header_pairs = headers.multi_items()
+    except AttributeError:
+        # Fallback for plain dicts (e.g. in tests that pass a dict)
+        all_header_pairs = list(headers.items())
+    for header_name, value in all_header_pairs:
+        if header_name.lower() in ("authorization", "set-cookie"):
+            for match in JWT_PATTERN.finditer(value):
+                tokens.append(match.group())
     # Check response body
     for match in JWT_PATTERN.finditer(text):
         tokens.append(match.group())
@@ -70,9 +75,8 @@ class JwtCheckPlugin(PluginBase):
             if len(resp.text) > 1_000_000:
                 return []
 
-        # Normalise header names to lowercase for lookup
-        lower_headers = {k.lower(): v for k, v in resp.headers.items()}
-        tokens = _extract_jwts(resp.text, lower_headers)
+        # Pass headers directly; _extract_jwts uses multi_items() for multi-value support
+        tokens = _extract_jwts(resp.text, resp.headers)
         if not tokens:
             return []
 
@@ -117,7 +121,7 @@ class JwtCheckPlugin(PluginBase):
                         "This token does not expire and can be replayed indefinitely."
                     ),
                     evidence=f"JWT payload keys: {list(payload_data.keys())}",
-                    cwe_id="CWE-347",
+                    cwe_id="CWE-613",
                     endpoint=target.url,
                     rule_id="jwt_weak_no_expiry",
                 ))
@@ -137,7 +141,7 @@ class JwtCheckPlugin(PluginBase):
                             "base64-encoded (not encrypted) and can be read by anyone."
                         ),
                         evidence=f"PII pattern matched in JWT payload: {match.group()!r}",
-                        cwe_id="CWE-347",
+                        cwe_id="CWE-359",
                         endpoint=target.url,
                         rule_id="jwt_weak_pii_in_payload",
                     ))

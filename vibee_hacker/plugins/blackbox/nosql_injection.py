@@ -45,10 +45,13 @@ class NoSqlInjectionPlugin(PluginBase):
 
         headers = {"Content-Type": "application/json"}
 
+        # Build the original (non-injected) body from URL params
+        original_body: dict = {k: v[0] for k, v in params.items()}
+
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            # Baseline: GET with original params
+            # Baseline: POST with original param values as JSON body
             try:
-                baseline_resp = await client.get(target.url)
+                baseline_resp = await client.post(target.url, json=original_body)
             except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 return []
 

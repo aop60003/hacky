@@ -26,7 +26,7 @@ class TestIdorCheck:
         )
         results = await plugin.run(target)
         assert len(results) >= 1
-        assert results[0].base_severity == Severity.CRITICAL
+        assert results[0].base_severity == Severity.HIGH
         assert results[0].cwe_id == "CWE-639"
         assert results[0].rule_id == "idor_id_enumeration"
 

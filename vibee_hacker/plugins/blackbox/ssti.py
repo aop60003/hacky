@@ -11,16 +11,15 @@ import httpx
 from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
 from vibee_hacker.core.plugin_base import PluginBase
 
-# Math expression payloads — rendered result is 49 (7*7)
+# Math expression payloads — rendered result is 50337 (7*7191)
 PAYLOADS = [
-    "{{7*7}}",
-    "${7*7}",
-    "<%= 7*7 %>",
-    "#{7*7}",
-    "{7*7}",
+    "{{7*7191}}",
+    "${7*7191}",
+    "<%= 7*7191 %>",
+    "#{7*7191}",
 ]
 
-EXPECTED_RESULT = "49"
+EXPECTED_RESULT = "50337"
 
 MAX_PARAMS = 10
 
@@ -32,7 +31,7 @@ class SstiPlugin(PluginBase):
     phase = 3
     base_severity = Severity.CRITICAL
     detection_criteria = "Math expression payload reflected as computed result in response"
-    expected_evidence = "Response contains '49' after injecting template expression '{{7*7}}'"
+    expected_evidence = "Response contains '50337' after injecting template expression '{{7*7191}}'"
 
     async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
         if not target.url:
