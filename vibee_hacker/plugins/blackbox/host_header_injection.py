@@ -15,12 +15,12 @@ EVIL_HOST = "evil.com"
 
 class HostHeaderInjectionPlugin(PluginBase):
     name = "host_header_injection"
-    description = "Detect host header injection by checking if injected host is reflected in response"
+    description = "Detect host header injection via X-Forwarded-Host/X-Host by checking if injected host is reflected in response"
     category = "blackbox"
     phase = 3
     base_severity = Severity.HIGH
-    detection_criteria = "Injected Host/X-Forwarded-Host value reflected in response body or headers"
-    expected_evidence = "evil.com found in response body or Location header after Host header injection"
+    detection_criteria = "Injected X-Forwarded-Host/X-Host value reflected in response body or headers"
+    expected_evidence = "evil.com found in response body or Location header after X-Forwarded-Host/X-Host injection"
 
     async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
         if not target.url:
@@ -33,8 +33,8 @@ class HostHeaderInjectionPlugin(PluginBase):
                 resp = await client.get(
                     target.url,
                     headers={
-                        "Host": EVIL_HOST,
                         "X-Forwarded-Host": EVIL_HOST,
+                        "X-Host": EVIL_HOST,
                     },
                 )
             except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
@@ -57,7 +57,7 @@ class HostHeaderInjectionPlugin(PluginBase):
                     base_severity=self.base_severity,
                     title="Host header injection - injected host reflected in response",
                     description=(
-                        f"The application reflects the injected Host header value '{EVIL_HOST}' "
+                        f"The application reflects the injected X-Forwarded-Host/X-Host header value '{EVIL_HOST}' "
                         f"in the {evidence_location}. This can be exploited for password reset poisoning, "
                         f"cache poisoning, or open redirects."
                     ),
@@ -66,8 +66,8 @@ class HostHeaderInjectionPlugin(PluginBase):
                     endpoint=target.url,
                     curl_command=(
                         f"curl {shlex.quote(target.url)} "
-                        f"-H 'Host: {EVIL_HOST}' "
-                        f"-H 'X-Forwarded-Host: {EVIL_HOST}'"
+                        f"-H 'X-Forwarded-Host: {EVIL_HOST}' "
+                        f"-H 'X-Host: {EVIL_HOST}'"
                     ),
                     rule_id="host_header_reflected",
                 ))

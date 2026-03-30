@@ -23,10 +23,9 @@ VERBOSE_ERROR_PATTERNS = [
     re.compile(r"Traceback", re.I),
     re.compile(r"stack trace", re.I),
     re.compile(r"SQLSTATE", re.I),
-    re.compile(r"\bat line\b", re.I),
-    re.compile(r"/usr/", re.I),
-    re.compile(r"/var/", re.I),
-    re.compile(r"C:\\\\", re.I),
+    re.compile(r"at .+\.(?:java|py|rb|php|cs|js|ts):\d+", re.I),
+    re.compile(r"(?:/usr/(?:local/)?(?:lib|share|src)|/var/(?:www|log))/", re.I),
+    re.compile(r"C:\\", re.I),
     re.compile(r"Exception in", re.I),
 ]
 

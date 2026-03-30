@@ -17,10 +17,9 @@ PAYLOADS = [
 ]
 
 POLLUTION_INDICATORS = [
-    "polluted",
+    '"polluted": true',
+    '"polluted":true',
     "Cannot set property",
-    "prototype",
-    "TypeError",
 ]
 
 
@@ -58,7 +57,7 @@ class PrototypePollutionPlugin(PluginBase):
                     indicator in resp.text for indicator in POLLUTION_INDICATORS
                 )
 
-                if is_server_error or body_indicates_pollution:
+                if is_server_error and body_indicates_pollution:
                     payload_str = json.dumps(payload)
                     results.append(Result(
                         plugin_name=self.name,

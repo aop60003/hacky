@@ -68,12 +68,43 @@ class MassAssignmentPlugin(PluginBase):
             baseline_body = baseline_resp.text
             mass_body = resp.text
 
-            # Check if any sensitive field appears in mass response but not in baseline
-            for field in SENSITIVE_FIELDS:
-                field_in_baseline = f'"{field}"' in baseline_body
-                field_in_mass = f'"{field}"' in mass_body
+            # Try to parse both responses as JSON for accurate value comparison
+            try:
+                baseline_json = json.loads(baseline_body)
+            except (json.JSONDecodeError, ValueError):
+                baseline_json = None
 
-                if field_in_mass and not field_in_baseline:
+            try:
+                mass_json = json.loads(mass_body)
+            except (json.JSONDecodeError, ValueError):
+                mass_json = None
+
+            # Check if any injected sensitive field VALUE appears in mass response but not baseline
+            for field in SENSITIVE_FIELDS:
+                injected_value = MASS_ASSIGN_EXTRA_FIELDS.get(field)
+
+                if baseline_json is not None and mass_json is not None:
+                    # JSON comparison: field must be present with the injected value in mass response
+                    # but either absent or with a different value in baseline
+                    mass_field_value = mass_json.get(field) if isinstance(mass_json, dict) else None
+                    baseline_field_value = baseline_json.get(field) if isinstance(baseline_json, dict) else None
+                    field_reflected = (
+                        mass_field_value == injected_value
+                        and baseline_field_value != injected_value
+                    )
+                else:
+                    # Fallback to text-based value search when JSON parsing fails
+                    injected_value_str = (
+                        json.dumps(injected_value) if not isinstance(injected_value, str)
+                        else f'"{injected_value}"'
+                    )
+                    field_key = f'"{field}"'
+                    field_reflected = (
+                        field_key in mass_body and injected_value_str in mass_body
+                        and not (field_key in baseline_body and injected_value_str in baseline_body)
+                    )
+
+                if field_reflected:
                     payload_str = json.dumps(mass_payload)
                     results.append(Result(
                         plugin_name=self.name,

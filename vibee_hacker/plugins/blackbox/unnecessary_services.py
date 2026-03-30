@@ -38,7 +38,6 @@ class UnnecessaryServicesPlugin(PluginBase):
     category = "blackbox"
     phase = 2
     base_severity = Severity.MEDIUM
-    detection_criteria = "Service endpoint returns 200 with content length > 50 chars"
     expected_evidence = "Accessible management or diagnostic endpoint with content"
     detection_criteria = "Management/diagnostic endpoint accessible with meaningful content"
 
