@@ -36,7 +36,7 @@ class CorsCheckPlugin(PluginBase):
                     resp = await client.get(
                         target.url, headers={"Origin": evil_origin}
                     )
-                except httpx.HTTPError:
+                except httpx.TransportError:
                     continue
 
                 acao = resp.headers.get("Access-Control-Allow-Origin", "")

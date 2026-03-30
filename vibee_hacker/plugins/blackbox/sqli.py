@@ -19,7 +19,7 @@ SQL_ERROR_PATTERNS = [
     re.compile(r"quoted string not properly terminated", re.I),
     re.compile(r"sql syntax.*error", re.I),
     re.compile(r"microsoft.*odbc.*driver", re.I),
-    re.compile(r"oracle.*error", re.I),
+    re.compile(r"ORA-\d{5}", re.I),
     re.compile(r"postgresql.*error", re.I),
     re.compile(r"sqlite3?\.OperationalError", re.I),
     re.compile(r"pg_query\(\).*failed", re.I),
@@ -50,9 +50,12 @@ class SqliPlugin(PluginBase):
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             # Fetch baseline response to compare against
             try:
-                await client.get(target.url)
-            except httpx.HTTPError:
+                baseline_resp = await client.get(target.url)
+            except httpx.TransportError:
                 return []
+
+            # Skip patterns that already fire on the baseline (pre-existing errors)
+            baseline_matched_patterns = {p for p in SQL_ERROR_PATTERNS if p.search(baseline_resp.text)}
 
             for param_name, values in params.items():
                 original_value = values[0] if values else ""
@@ -63,10 +66,12 @@ class SqliPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.HTTPError:
+                    except httpx.TransportError:
                         continue
 
                     for pattern in SQL_ERROR_PATTERNS:
+                        if pattern in baseline_matched_patterns:
+                            continue
                         if pattern.search(resp.text):
                             results.append(Result(
                                 plugin_name=self.name,

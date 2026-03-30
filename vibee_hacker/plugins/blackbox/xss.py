@@ -46,7 +46,7 @@ class XssPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.HTTPError:
+                    except httpx.TransportError:
                         continue
 
                     content_type = resp.headers.get("content-type", "")

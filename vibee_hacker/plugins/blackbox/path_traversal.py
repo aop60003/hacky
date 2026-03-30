@@ -48,9 +48,12 @@ class PathTraversalPlugin(PluginBase):
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             # Fetch baseline response
             try:
-                await client.get(target.url)
-            except httpx.HTTPError:
+                baseline_resp = await client.get(target.url)
+            except httpx.TransportError:
                 return []
+
+            # Determine which signatures already match in baseline — skip those later
+            baseline_matched_sigs = {sig for sig in FILE_SIGNATURES if sig.search(baseline_resp.text)}
 
             for param_name in params:
                 for payload in TRAVERSAL_PAYLOADS:
@@ -60,10 +63,12 @@ class PathTraversalPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.HTTPError:
+                    except httpx.TransportError:
                         continue
 
                     for sig in FILE_SIGNATURES:
+                        if sig in baseline_matched_sigs:
+                            continue
                         if sig.search(resp.text):
                             results.append(Result(
                                 plugin_name=self.name,

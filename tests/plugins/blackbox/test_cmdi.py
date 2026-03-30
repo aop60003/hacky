@@ -35,5 +35,6 @@ class TestCmdi:
         httpx_mock.add_response(text="PING test")
         httpx_mock.add_response(text="PING test")
         httpx_mock.add_response(text="PING test")
+        httpx_mock.add_response(text="PING test")
         results = await plugin.run(target)
         assert len(results) == 0

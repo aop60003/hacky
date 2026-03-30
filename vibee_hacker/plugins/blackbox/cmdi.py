@@ -18,6 +18,7 @@ PAYLOADS = [
     f"`echo {MARKER}`",
     f"$(echo {MARKER})",
     f"&&echo {MARKER}",
+    f"& echo {MARKER}",        # Windows cmd
 ]
 
 
@@ -46,7 +47,7 @@ class CmdiPlugin(PluginBase):
                 baseline_resp = await client.get(target.url)
                 if MARKER in baseline_resp.text:
                     return []
-            except httpx.HTTPError:
+            except httpx.TransportError:
                 return []
 
             for param_name, values in params.items():
@@ -58,7 +59,7 @@ class CmdiPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.HTTPError:
+                    except httpx.TransportError:
                         continue
 
                     if MARKER in resp.text:
