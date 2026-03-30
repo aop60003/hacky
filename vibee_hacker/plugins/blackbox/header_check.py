@@ -33,7 +33,7 @@ class HeaderCheckPlugin(PluginBase):
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             try:
                 resp = await client.get(target.url)
-            except httpx.TransportError:
+            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 return []
 
         results = []

@@ -50,7 +50,7 @@ class XssPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.TransportError:
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                         continue
 
                     if len(resp.text) > 1_000_000:  # 1MB max response

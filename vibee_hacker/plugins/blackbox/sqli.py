@@ -55,7 +55,7 @@ class SqliPlugin(PluginBase):
             # Fetch baseline response to compare against
             try:
                 baseline_resp = await client.get(target.url)
-            except httpx.TransportError:
+            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 return []
 
             # Skip patterns that already fire on the baseline (pre-existing errors)
@@ -70,7 +70,7 @@ class SqliPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.TransportError:
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                         continue
 
                     if len(resp.text) > 1_000_000:  # 1MB max response

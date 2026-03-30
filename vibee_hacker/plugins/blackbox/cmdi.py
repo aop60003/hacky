@@ -51,7 +51,7 @@ class CmdiPlugin(PluginBase):
                 baseline_resp = await client.get(target.url)
                 if MARKER in baseline_resp.text:
                     return []
-            except httpx.TransportError:
+            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 return []
 
             for param_name, values in params.items():
@@ -63,7 +63,7 @@ class CmdiPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.TransportError:
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                         continue
 
                     if len(resp.text) > 1_000_000:  # 1MB max response

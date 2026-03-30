@@ -53,7 +53,7 @@ class PathTraversalPlugin(PluginBase):
             # Fetch baseline response
             try:
                 baseline_resp = await client.get(target.url)
-            except httpx.TransportError:
+            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 return []
 
             # Determine which signatures already match in baseline — skip those later
@@ -67,7 +67,7 @@ class PathTraversalPlugin(PluginBase):
 
                     try:
                         resp = await client.get(test_url)
-                    except httpx.TransportError:
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                         continue
 
                     if len(resp.text) > 1_000_000:  # 1MB max response
