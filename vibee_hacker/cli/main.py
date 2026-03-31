@@ -68,14 +68,15 @@ def scan(
     effective_timeout = timeout
     effective_safe_mode = safe_mode
 
-    if profile and profile in PROFILES:
+    if profile and profile != "default":
         preset = PROFILES[profile]
-        # Only override if the user did not explicitly set via flag.
-        # Click does not easily differentiate "defaulted" vs "explicit", so we
-        # apply preset values unconditionally (profile is documented as a preset).
-        effective_concurrency = preset["concurrency"]
-        effective_timeout = preset["timeout"]
-        effective_safe_mode = preset["safe_mode"]
+        ctx = click.get_current_context()
+        if ctx.get_parameter_source("timeout") == click.core.ParameterSource.DEFAULT:
+            effective_timeout = preset["timeout"]
+        if ctx.get_parameter_source("concurrency") == click.core.ParameterSource.DEFAULT:
+            effective_concurrency = preset["concurrency"]
+        if ctx.get_parameter_source("safe_mode") == click.core.ParameterSource.DEFAULT:
+            effective_safe_mode = preset["safe_mode"]
 
     verify_ssl = not insecure
 
@@ -87,7 +88,11 @@ def scan(
     loader = PluginLoader()
     loader.load_builtin()
 
-    engine = ScanEngine(timeout_per_plugin=effective_timeout)
+    engine = ScanEngine(
+        timeout_per_plugin=effective_timeout,
+        max_concurrency=effective_concurrency,
+        safe_mode=effective_safe_mode,
+    )
     for p in loader.plugins:
         engine.register_plugin(p)
 

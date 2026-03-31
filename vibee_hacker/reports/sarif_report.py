@@ -7,16 +7,18 @@ from vibee_hacker.core.models import Result, Target
 
 class SarifReporter:
     def generate(self, results: list[Result], target: Target, output_path: str) -> None:
+        rules = self._build_rules(results)
+        rule_index_map: dict[str, int] = {r["id"]: i for i, r in enumerate(rules)}
         runs = [
             {
                 "tool": {
                     "driver": {
                         "name": "VIBEE-Hacker",
                         "version": "0.1.0",
-                        "rules": self._build_rules(results),
+                        "rules": rules,
                     }
                 },
-                "results": [self._build_result(r) for r in results],
+                "results": [self._build_result(r, rule_index_map) for r in results],
             }
         ]
         sarif = {
@@ -40,7 +42,7 @@ class SarifReporter:
                 rules.append(rule)
         return rules
 
-    def _build_result(self, r: Result) -> dict:
+    def _build_result(self, r: Result, rule_index_map: dict[str, int]) -> dict:
         severity_map = {
             "critical": "error",
             "high": "error",
@@ -48,15 +50,24 @@ class SarifReporter:
             "low": "note",
             "info": "note",
         }
-        return {
-            "ruleId": r.rule_id or r.plugin_name,
+        rule_id = r.rule_id or r.plugin_name
+        uri = r.endpoint or "unknown"
+        # Normalize absolute paths to forward-slash relative URIs
+        if uri.startswith("/") or (len(uri) > 1 and uri[1] == ":"):
+            uri = uri.replace("\\", "/")
+
+        result: dict = {
+            "ruleId": rule_id,
             "level": severity_map.get(str(r.context_severity), "note"),
             "message": {"text": r.description},
             "locations": [
                 {
                     "physicalLocation": {
-                        "artifactLocation": {"uri": r.endpoint or "unknown"}
+                        "artifactLocation": {"uri": uri}
                     }
                 }
             ],
         }
+        if rule_id in rule_index_map:
+            result["ruleIndex"] = rule_index_map[rule_id]
+        return result
