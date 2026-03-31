@@ -16,10 +16,10 @@ DANGEROUS_PATTERNS: list[tuple[str, re.Pattern, str]] = [
     ("passthru(", re.compile(r'\bpassthru\s*\('), "CWE-78"),
     ("shell_exec(", re.compile(r'\bshell_exec\s*\('), "CWE-78"),
     ("preg_replace /e modifier", re.compile(r'\bpreg_replace\s*\(\s*[\'"][^\'"]*/e[\'"]'), "CWE-78"),
-    ("unserialize(", re.compile(r'\bunserialize\s*\('), "CWE-78"),
-    ("include($", re.compile(r'\b(?:include|require)(?:_once)?\s*\(\s*\$'), "CWE-78"),
-    ("file_get_contents($", re.compile(r'\bfile_get_contents\s*\(\s*\$'), "CWE-78"),
-    ("curl_exec(", re.compile(r'\bcurl_exec\s*\('), "CWE-78"),
+    ("unserialize(", re.compile(r'\bunserialize\s*\('), "CWE-502"),
+    ("include($", re.compile(r'\b(?:include|require)(?:_once)?\s*\(\s*\$'), "CWE-98"),
+    ("file_get_contents($", re.compile(r'\bfile_get_contents\s*\(\s*\$'), "CWE-918"),
+    ("curl_exec(", re.compile(r'\bcurl_exec\s*\('), "CWE-918"),
 ]
 
 

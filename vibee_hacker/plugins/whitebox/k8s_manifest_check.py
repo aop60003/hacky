@@ -32,10 +32,10 @@ _LINE_CHECKS: list[tuple[str, re.Pattern, str, str, str]] = [
     (
         "k8s_run_as_root",
         re.compile(
-            r"^\s*(runAsRoot\s*:\s*true|runAsUser\s*:\s*0)\b",
+            r"^\s*(runAsNonRoot\s*:\s*false|runAsUser\s*:\s*0)\b",
             re.IGNORECASE | re.MULTILINE,
         ),
-        "Kubernetes container configured to run as root (UID 0)",
+        "Container allows running as root (runAsNonRoot: false)",
         "Running as UID 0 inside a container escalates risk if the container is compromised.",
         "Set `runAsNonRoot: true` and `runAsUser` to a non-zero UID.",
     ),

@@ -38,8 +38,10 @@ class TestGitHubActionsCheck:
         assert any("gha_unpinned_action" in rid for rid in rule_ids)
         assert any("gha_script_injection" in rid for rid in rule_ids)
         assert any("gha_pull_request_target" in rid for rid in rule_ids)
-        for r in results:
-            assert r.cwe_id == "CWE-78"
+        cwe_by_rule = {r.rule_id: r.cwe_id for r in results}
+        assert cwe_by_rule["gha_unpinned_action"] == "CWE-829"
+        assert cwe_by_rule["gha_script_injection"] == "CWE-78"
+        assert cwe_by_rule["gha_pull_request_target"] == "CWE-829"
 
     # ------------------------------------------------------------------ #
     # Test 2: Secure workflow — no findings

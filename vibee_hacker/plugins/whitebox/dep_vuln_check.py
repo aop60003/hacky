@@ -9,6 +9,12 @@ from typing import NamedTuple
 from vibee_hacker.core.models import InterPhaseContext, Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
 
+SKIP_DIRS = {"node_modules", "venv", ".git", "dist", "build", "__pycache__", ".tox", "vendor"}
+
+
+def _should_skip(path: Path) -> bool:
+    return any(part in SKIP_DIRS for part in path.parts)
+
 
 class VulnEntry(NamedTuple):
     pkg: str
@@ -103,13 +109,15 @@ class DepVulnCheckPlugin(PluginBase):
 
         results: list[Result] = []
 
-        # --- requirements.txt ---
-        req_file = root / "requirements.txt"
-        if req_file.is_file():
+        # --- requirements.txt (all nested instances) ---
+        for req_file in root.rglob("requirements.txt"):
+            if not req_file.is_file() or _should_skip(req_file):
+                continue
             try:
                 content = req_file.read_text(errors="ignore")
             except OSError:
-                content = ""
+                continue
+            rel = req_file.relative_to(root)
             packages = _parse_requirements(content)
             for pkg_name, version in packages:
                 for entry in PYTHON_VULNS:
@@ -123,7 +131,7 @@ class DepVulnCheckPlugin(PluginBase):
                                 f"Package '{pkg_name}' version {version} is affected by {entry.cve}. "
                                 f"Upgrade to >= {safe_ver}."
                             ),
-                            evidence=f"requirements.txt: {pkg_name}=={version}",
+                            evidence=f"{rel}: {pkg_name}=={version}",
                             recommendation=f"Upgrade {pkg_name} to >= {safe_ver}.",
                             cwe_id="CWE-1104",
                             rule_id="dep_known_vulnerability",
@@ -131,13 +139,15 @@ class DepVulnCheckPlugin(PluginBase):
                         ))
                         break
 
-        # --- package.json ---
-        pkg_json_file = root / "package.json"
-        if pkg_json_file.is_file():
+        # --- package.json (all nested instances) ---
+        for pkg_json_file in root.rglob("package.json"):
+            if not pkg_json_file.is_file() or _should_skip(pkg_json_file):
+                continue
             try:
                 content = pkg_json_file.read_text(errors="ignore")
             except OSError:
-                content = ""
+                continue
+            rel = pkg_json_file.relative_to(root)
             packages = _parse_package_json(content)
             for pkg_name, version in packages:
                 for entry in JS_VULNS:
@@ -151,7 +161,7 @@ class DepVulnCheckPlugin(PluginBase):
                                 f"Package '{pkg_name}' version {version} is affected by {entry.cve}. "
                                 f"Upgrade to >= {safe_ver}."
                             ),
-                            evidence=f"package.json: {pkg_name}@{version}",
+                            evidence=f"{rel}: {pkg_name}@{version}",
                             recommendation=f"Upgrade {pkg_name} to >= {safe_ver}.",
                             cwe_id="CWE-1104",
                             rule_id="dep_known_vulnerability",

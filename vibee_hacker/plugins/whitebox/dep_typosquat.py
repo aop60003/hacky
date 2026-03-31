@@ -14,7 +14,6 @@ KNOWN_TYPOSQUATS: dict[str, str] = {
     "requets": "requests",
     "reqeusts": "requests",
     "reqests": "requests",
-    "request": "requests",
     "djnago": "django",
     "dajngo": "django",
     "djang0": "django",

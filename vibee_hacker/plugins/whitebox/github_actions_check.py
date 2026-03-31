@@ -95,7 +95,7 @@ class GitHubActionsCheckPlugin(PluginBase):
                         ),
                         evidence=f"{rel}:{line_num}: {line_text[:120]}",
                         recommendation="Pin actions to a full commit SHA, e.g. `uses: actions/checkout@abc1234`.",
-                        cwe_id="CWE-78",
+                        cwe_id="CWE-829",
                         rule_id="gha_unpinned_action",
                         endpoint=str(wf_path),
                     )
@@ -144,7 +144,7 @@ class GitHubActionsCheckPlugin(PluginBase):
                             "Avoid pull_request_target unless required; if used, never check out "
                             "PR code or use it to trigger untrusted scripts."
                         ),
-                        cwe_id="CWE-78",
+                        cwe_id="CWE-829",
                         rule_id="gha_pull_request_target",
                         endpoint=str(wf_path),
                     )
@@ -165,7 +165,7 @@ class GitHubActionsCheckPlugin(PluginBase):
                         ),
                         evidence=f"{rel}:{line_num}: {line_text[:120]}",
                         recommendation="Use `${{ secrets.MY_SECRET }}` to reference repository secrets.",
-                        cwe_id="CWE-78",
+                        cwe_id="CWE-798",
                         rule_id="gha_plaintext_secret",
                         endpoint=str(wf_path),
                     )
