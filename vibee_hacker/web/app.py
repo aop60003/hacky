@@ -13,8 +13,9 @@ from pydantic import BaseModel
 from vibee_hacker.core.engine import ScanEngine
 from vibee_hacker.core.models import Target
 from vibee_hacker.core.plugin_loader import PluginLoader
+from vibee_hacker import __version__ as _version
 
-app = FastAPI(title="VIBEE-Hacker Dashboard", version="0.1.0")
+app = FastAPI(title="VIBEE-Hacker Dashboard", version=_version)
 
 # In-memory scan result store
 _scan_results: dict[str, dict] = {}

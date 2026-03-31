@@ -50,7 +50,7 @@ class TestSarifReporter:
 
         run = sarif["runs"][0]
         assert run["tool"]["driver"]["name"] == "VIBEE-Hacker"
-        assert run["tool"]["driver"]["version"] == "0.1.0"
+        assert run["tool"]["driver"]["version"] == "1.0.0"
 
         rules = run["tool"]["driver"]["rules"]
         assert len(rules) == 2
