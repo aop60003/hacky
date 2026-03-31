@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
-from jinja2 import Template
+from jinja2 import Environment
 
 from vibee_hacker.core.models import Result, Target
 
@@ -91,7 +91,8 @@ class HtmlReporter:
             }
             for r in results
         ]
-        tmpl = Template(HTML_TEMPLATE)
+        env = Environment(autoescape=True)
+        tmpl = env.from_string(HTML_TEMPLATE)
         html = tmpl.render(
             target=target.url or target.path,
             mode=target.mode,

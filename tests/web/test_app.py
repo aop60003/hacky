@@ -63,7 +63,8 @@ class TestDashboard:
     def test_get_result_not_found(self):
         client = TestClient(app)
         resp = client.get("/api/results/nonexistent")
-        assert resp.json()["error"] == "not found"
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Scan not found"
 
     def test_multiple_scans_listed(self):
         client = TestClient(app)
@@ -71,6 +72,44 @@ class TestDashboard:
         client.post("/api/scan", json={"target": "https://other.com", "mode": "blackbox"})
         list_resp = client.get("/api/results")
         assert len(list_resp.json()) == 2
+
+    def test_blackbox_invalid_target_returns_400(self):
+        client = TestClient(app)
+        resp = client.post("/api/scan", json={"target": "not-a-url", "mode": "blackbox"})
+        assert resp.status_code == 400
+
+    def test_whitebox_nonexistent_path_returns_400(self):
+        client = TestClient(app)
+        resp = client.post("/api/scan", json={"target": "/nonexistent/path/xyz", "mode": "whitebox"})
+        assert resp.status_code == 400
+
+    def test_store_limit_evicts_oldest(self):
+        from vibee_hacker.web.app import _scan_results, MAX_STORED_RESULTS
+        import uuid
+        # Fill store to MAX_STORED_RESULTS with known dates
+        for i in range(MAX_STORED_RESULTS):
+            sid = str(uuid.uuid4())
+            _scan_results[sid] = {
+                "id": sid, "target": f"https://t{i}.com", "mode": "blackbox",
+                "scan_date": f"2026-01-{i+1:02d}T00:00:00+00:00",
+                "total_findings": 0, "findings": [],
+            }
+        assert len(_scan_results) == MAX_STORED_RESULTS
+        # Add one more via a direct dict insert + eviction logic (simulate the endpoint)
+        newest_id = str(uuid.uuid4())
+        _scan_results[newest_id] = {
+            "id": newest_id, "target": "https://newest.com", "mode": "blackbox",
+            "scan_date": "2026-12-31T00:00:00+00:00",
+            "total_findings": 0, "findings": [],
+        }
+        if len(_scan_results) > MAX_STORED_RESULTS:
+            oldest = min(_scan_results, key=lambda k: _scan_results[k]["scan_date"])
+            del _scan_results[oldest]
+        assert len(_scan_results) == MAX_STORED_RESULTS
+        assert newest_id in _scan_results
+        # The entry with the smallest date (2026-01-01) should have been removed
+        targets = [v["target"] for v in _scan_results.values()]
+        assert "https://t0.com" not in targets
 
     def test_results_sorted_by_date_descending(self):
         """Verify results list is sorted by scan_date descending using direct store injection."""

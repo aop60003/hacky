@@ -86,6 +86,27 @@ class TestHtmlReporter:
         assert "A" * 120 in html
         assert "A" * 200 not in html
 
+    def test_xss_payload_is_escaped(self, tmp_path):
+        """Verify Jinja2 autoescape prevents XSS in report output."""
+        xss_payload = '<script>alert("xss")</script>'
+        results = [
+            Result(
+                plugin_name="p",
+                base_severity=Severity.HIGH,
+                title=xss_payload,
+                description=xss_payload,
+                evidence=xss_payload,
+            )
+        ]
+        target = Target(url=f"https://evil.com/{xss_payload}")
+        output = tmp_path / "report.html"
+        HtmlReporter().generate(results, target, str(output))
+        html = output.read_text()
+        # Raw script tags must not appear unescaped
+        assert "<script>alert" not in html
+        # Escaped form must be present
+        assert "&lt;script&gt;" in html
+
     def test_all_severity_badges(self, tmp_path):
         results = [
             Result(plugin_name="p", base_severity=s, title="T", description="D")

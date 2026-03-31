@@ -4,8 +4,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -17,6 +18,7 @@ app = FastAPI(title="VIBEE-Hacker Dashboard", version="0.1.0")
 
 # In-memory scan result store
 _scan_results: dict[str, dict] = {}
+MAX_STORED_RESULTS = 100
 
 
 class ScanRequest(BaseModel):
@@ -58,10 +60,11 @@ a{color:#4da6ff}
 <table><thead><tr><th>ID</th><th>Target</th><th>Mode</th><th>Findings</th><th>Date</th></tr></thead>
 <tbody id="results"></tbody></table>
 <script>
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 async function loadResults(){
   const r=await fetch('/api/results');const data=await r.json();
   document.getElementById('results').innerHTML=data.map(s=>
-    `<tr><td><a href="/api/results/${s.id}">${s.id.slice(0,8)}</a></td><td>${s.target}</td><td>${s.mode}</td><td>${s.total_findings}</td><td>${s.scan_date}</td></tr>`
+    `<tr><td><a href="/api/results/${esc(s.id)}">${esc(s.id.slice(0,8))}</a></td><td>${esc(s.target)}</td><td>${esc(s.mode)}</td><td>${esc(s.total_findings)}</td><td>${esc(s.scan_date)}</td></tr>`
   ).join('');
 }
 document.getElementById('scanForm').onsubmit=async(e)=>{
@@ -83,8 +86,13 @@ async def dashboard():
 @app.post("/api/scan")
 async def run_scan(req: ScanRequest):
     if req.mode == "blackbox":
+        if not (req.target.startswith("http://") or req.target.startswith("https://")):
+            raise HTTPException(status_code=400, detail="Blackbox target must start with http:// or https://")
         target = Target(url=req.target, mode=req.mode)
     else:
+        p = Path(req.target)
+        if not p.exists() or not p.is_dir():
+            raise HTTPException(status_code=400, detail="Whitebox target must be an existing directory")
         target = Target(path=req.target, mode=req.mode)
 
     loader = PluginLoader()
@@ -104,6 +112,9 @@ async def run_scan(req: ScanRequest):
         "findings": [r.to_dict() for r in results],
     }
     _scan_results[scan_id] = scan_data
+    if len(_scan_results) > MAX_STORED_RESULTS:
+        oldest = min(_scan_results, key=lambda k: _scan_results[k]["scan_date"])
+        del _scan_results[oldest]
     return scan_data
 
 
@@ -114,6 +125,6 @@ async def list_results():
 
 @app.get("/api/results/{scan_id}")
 async def get_result(scan_id: str):
-    if scan_id in _scan_results:
-        return _scan_results[scan_id]
-    return {"error": "not found"}
+    if scan_id not in _scan_results:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return _scan_results[scan_id]
