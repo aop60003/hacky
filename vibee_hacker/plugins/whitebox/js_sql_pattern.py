@@ -58,6 +58,8 @@ class JsSqlPatternPlugin(PluginBase):
             if _should_skip(src_file):
                 continue
             try:
+                if src_file.stat().st_size > 5_000_000:
+                    continue
                 content = src_file.read_text(errors="ignore")
             except OSError:
                 continue

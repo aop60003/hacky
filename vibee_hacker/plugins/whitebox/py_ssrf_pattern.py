@@ -20,6 +20,11 @@ HTTP_CALL_PATTERN = re.compile(
 # String literal starters – if the arg starts with these, it's a literal (safe)
 STRING_LITERAL_PATTERN = re.compile(r'^["\']|^[brBR]*["\']|^f["\']')
 
+# Allowlist: URL arguments that reference config/settings/env/constants are likely safe
+SSRF_FP_ALLOWLIST = re.compile(
+    r'(?:config\.|settings\.|os\.environ|environ\.get|getenv|[A-Z_]{3,})'
+)
+
 
 def _should_skip(path: Path) -> bool:
     return any(skip in path.parts for skip in SKIP_DIRS)
@@ -46,6 +51,8 @@ class PySsrfPatternPlugin(PluginBase):
             if not src_file.is_file() or _should_skip(src_file):
                 continue
             try:
+                if src_file.stat().st_size > 5_000_000:
+                    continue
                 content = src_file.read_text(errors="ignore")
             except OSError:
                 continue
@@ -56,6 +63,9 @@ class PySsrfPatternPlugin(PluginBase):
                     first_arg = match.group(1).strip()
                     # Skip if the argument is a string literal
                     if STRING_LITERAL_PATTERN.match(first_arg):
+                        continue
+                    # Skip if the URL argument looks like a config/env/constant reference
+                    if SSRF_FP_ALLOWLIST.search(first_arg):
                         continue
                     results.append(
                         Result(

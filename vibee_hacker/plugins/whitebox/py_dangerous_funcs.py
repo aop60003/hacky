@@ -16,7 +16,7 @@ DANGEROUS_PATTERNS: list[tuple[str, re.Pattern, str]] = [
     ("pickle.loads()", re.compile(r'\bpickle\.loads\s*\('), "CWE-502"),
     ("shelve.open()", re.compile(r'\bshelve\.open\s*\('), "CWE-502"),
     ("marshal.loads()", re.compile(r'\bmarshal\.loads\s*\('), "CWE-502"),
-    ("yaml.load() without SafeLoader", re.compile(r'\byaml\.load\s*\([^)]*\)(?!.*SafeLoader)'), "CWE-94"),
+    ("yaml.load() without SafeLoader", re.compile(r'\byaml\.load\s*\('), "CWE-94"),
     ("subprocess with shell=True", re.compile(r'\bsubprocess\.\w+\s*\([^)]*shell\s*=\s*True'), "CWE-78"),
     ("os.system()", re.compile(r'\bos\.system\s*\('), "CWE-78"),
     ("__import__()", re.compile(r'\b__import__\s*\('), "CWE-94"),
@@ -48,6 +48,8 @@ class PyDangerousFuncsPlugin(PluginBase):
             if not src_file.is_file() or _should_skip(src_file):
                 continue
             try:
+                if src_file.stat().st_size > 5_000_000:
+                    continue
                 content = src_file.read_text(errors="ignore")
             except OSError:
                 continue
@@ -55,6 +57,9 @@ class PyDangerousFuncsPlugin(PluginBase):
             for lineno, line in enumerate(content.splitlines(), start=1):
                 for label, pat, cwe in DANGEROUS_PATTERNS:
                     if pat.search(line):
+                        # yaml.load with SafeLoader/FullLoader is safe — skip
+                        if "yaml.load" in line and any(safe in line for safe in ("SafeLoader", "FullLoader", "safe_load")):
+                            continue
                         results.append(
                             Result(
                                 plugin_name=self.name,
