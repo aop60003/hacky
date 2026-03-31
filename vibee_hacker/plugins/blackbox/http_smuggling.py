@@ -30,10 +30,16 @@ class HttpSmugglingPlugin(PluginBase):
         if not target.url:
             return []
 
+        normal_body = b"a=1"
+        normal_headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": str(len(normal_body)),
+        }
+
         # CL.TE probe: Content-Length says 5 bytes, but body is chunked with different length
         # This creates ambiguity between front-end (uses CL) and back-end (uses TE)
         probe_body = b"0\r\n\r\n"  # chunked terminator as body
-        headers = {
+        probe_headers = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Content-Length": str(len(probe_body)),
             "Transfer-Encoding": "chunked",
@@ -42,15 +48,29 @@ class HttpSmugglingPlugin(PluginBase):
 
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
             try:
-                resp = await client.post(
+                baseline = await client.post(
                     target.url,
-                    content=probe_body,
-                    headers=headers,
+                    content=normal_body,
+                    headers=normal_headers,
                 )
             except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 return []
 
-        if resp.status_code in SMUGGLING_INDICATOR_CODES:
+            # If the server already rejects normal POSTs with 400/500, skip to avoid FP
+            if baseline.status_code in SMUGGLING_INDICATOR_CODES:
+                return []
+
+            try:
+                resp = await client.post(
+                    target.url,
+                    content=probe_body,
+                    headers=probe_headers,
+                )
+            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                return []
+
+        # Only report if probe response is DIFFERENT from baseline AND in the suspicious set
+        if resp.status_code in SMUGGLING_INDICATOR_CODES and resp.status_code != baseline.status_code:
             return [Result(
                 plugin_name=self.name,
                 base_severity=self.base_severity,
@@ -63,7 +83,8 @@ class HttpSmugglingPlugin(PluginBase):
                 ),
                 evidence=(
                     f"URL: {target.url} | Probe: CL.TE ambiguous framing | "
-                    f"Response status: {resp.status_code}"
+                    f"Baseline status: {baseline.status_code} | "
+                    f"Probe response status: {resp.status_code}"
                 ),
                 cwe_id="CWE-444",
                 endpoint=target.url,

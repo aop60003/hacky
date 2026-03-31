@@ -17,9 +17,14 @@ class TestHttpSmuggling:
 
     @pytest.mark.asyncio
     async def test_timing_anomaly_detected(self, plugin, target, httpx_mock):
-        """Unexpected response to ambiguous CL.TE request is reported as CRITICAL."""
-        # Server responds with 400 or unexpected status to CL.TE probe indicating
-        # the server is sensitive to the ambiguous framing
+        """Probe returning 400 when baseline is 200 is reported as CRITICAL."""
+        # Baseline: normal POST returns 200
+        httpx_mock.add_response(
+            url="http://example.com/",
+            status_code=200,
+            text="OK",
+        )
+        # CL.TE probe: server responds with 400 indicating framing confusion
         httpx_mock.add_response(
             url="http://example.com/",
             status_code=400,
@@ -33,7 +38,14 @@ class TestHttpSmuggling:
 
     @pytest.mark.asyncio
     async def test_normal_200_response_returns_empty(self, plugin, target, httpx_mock):
-        """Normal 200 response to probe produces no results."""
+        """Normal 200 response to both baseline and probe produces no results."""
+        # Baseline
+        httpx_mock.add_response(
+            url="http://example.com/",
+            status_code=200,
+            text="<html><body>OK</body></html>",
+        )
+        # Probe also 200
         httpx_mock.add_response(
             url="http://example.com/",
             status_code=200,
@@ -43,8 +55,34 @@ class TestHttpSmuggling:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_transport_error_returns_empty(self, plugin, target, httpx_mock):
-        """Transport error is handled gracefully."""
+    async def test_baseline_already_400_skipped(self, plugin, target, httpx_mock):
+        """If baseline already returns 400, the probe is skipped to avoid false positives."""
+        # Baseline returns 400 (server rejects all POSTs)
+        httpx_mock.add_response(
+            url="http://example.com/",
+            status_code=400,
+            text="Bad Request",
+        )
+        results = await plugin.run(target)
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_transport_error_on_baseline_returns_empty(self, plugin, target, httpx_mock):
+        """Transport error on baseline request is handled gracefully."""
+        httpx_mock.add_exception(httpx.ConnectError("connection refused"))
+        results = await plugin.run(target)
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_transport_error_on_probe_returns_empty(self, plugin, target, httpx_mock):
+        """Transport error on probe request (after successful baseline) is handled gracefully."""
+        # Baseline succeeds
+        httpx_mock.add_response(
+            url="http://example.com/",
+            status_code=200,
+            text="OK",
+        )
+        # Probe fails
         httpx_mock.add_exception(httpx.ConnectError("connection refused"))
         results = await plugin.run(target)
         assert results == []

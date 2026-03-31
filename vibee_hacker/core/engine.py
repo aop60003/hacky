@@ -16,10 +16,11 @@ logger = logging.getLogger(__name__)
 class ScanEngine:
     """Core scan engine that manages plugin lifecycle."""
 
-    def __init__(self, timeout_per_plugin: int = 60, max_concurrency: int = 10):
+    def __init__(self, timeout_per_plugin: int = 60, max_concurrency: int = 10, safe_mode: bool = True):
         self._plugins: list[PluginBase] = []
         self._timeout = timeout_per_plugin
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._safe_mode = safe_mode
 
     def register_plugin(self, plugin: PluginBase) -> None:
         self._plugins.append(plugin)
@@ -29,8 +30,10 @@ class ScanEngine:
         target: Target,
         phases: list[int] | None = None,
         plugins: list[str] | None = None,
+        safe_mode: bool | None = None,
     ) -> list[Result]:
-        applicable = self._filter_plugins(target, phases, plugins)
+        effective_safe_mode = self._safe_mode if safe_mode is None else safe_mode
+        applicable = self._filter_plugins(target, phases, plugins, effective_safe_mode)
         by_phase: dict[int, list[PluginBase]] = defaultdict(list)
         for p in applicable:
             by_phase[p.phase].append(p)
@@ -110,8 +113,11 @@ class ScanEngine:
         target: Target,
         phases: list[int] | None,
         plugins: list[str] | None,
+        safe_mode: bool = True,
     ) -> list[PluginBase]:
         result = [p for p in self._plugins if p.is_applicable(target)]
+        if safe_mode:
+            result = [p for p in result if p.destructive_level == 0]
         if phases:
             result = [p for p in result if p.phase in phases]
         if plugins:

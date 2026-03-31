@@ -109,3 +109,83 @@ class TestScanEngine:
         assert len(results) == 1
         assert results[0].plugin_status == "failed"
         assert "timed out" in results[0].description
+
+    @pytest.mark.asyncio
+    async def test_safe_mode_filters_destructive_plugins(self, target):
+        """safe_mode=True (default) should exclude plugins with destructive_level > 0."""
+
+        class DestructivePlugin(PluginBase):
+            name = "destructive_test"
+            category = "blackbox"
+            phase = 2
+            base_severity = Severity.HIGH
+            destructive_level = 1
+
+            async def run(self, target, context=None):
+                return [Result(
+                    plugin_name=self.name,
+                    base_severity=self.base_severity,
+                    title="Destructive action",
+                    description="Would cause side effects",
+                )]
+
+        engine = ScanEngine(safe_mode=True)
+        engine.register_plugin(PassivePlugin())
+        engine.register_plugin(DestructivePlugin())
+        results = await engine.scan(target)
+        names = [r.plugin_name for r in results]
+        assert "passive_test" in names
+        assert "destructive_test" not in names
+
+    @pytest.mark.asyncio
+    async def test_safe_mode_false_includes_destructive_plugins(self, target):
+        """safe_mode=False should allow plugins with destructive_level > 0 to run."""
+
+        class DestructivePlugin(PluginBase):
+            name = "destructive_test2"
+            category = "blackbox"
+            phase = 2
+            base_severity = Severity.HIGH
+            destructive_level = 1
+
+            async def run(self, target, context=None):
+                return [Result(
+                    plugin_name=self.name,
+                    base_severity=self.base_severity,
+                    title="Destructive action",
+                    description="Would cause side effects",
+                )]
+
+        engine = ScanEngine(safe_mode=False)
+        engine.register_plugin(PassivePlugin())
+        engine.register_plugin(DestructivePlugin())
+        results = await engine.scan(target)
+        names = [r.plugin_name for r in results]
+        assert "passive_test" in names
+        assert "destructive_test2" in names
+
+    @pytest.mark.asyncio
+    async def test_scan_safe_mode_override_per_call(self, target):
+        """safe_mode kwarg on scan() overrides the engine-level setting."""
+
+        class DestructivePlugin(PluginBase):
+            name = "destructive_test3"
+            category = "blackbox"
+            phase = 2
+            base_severity = Severity.HIGH
+            destructive_level = 2
+
+            async def run(self, target, context=None):
+                return [Result(
+                    plugin_name=self.name,
+                    base_severity=self.base_severity,
+                    title="Destructive action",
+                    description="Would cause side effects",
+                )]
+
+        # Engine default is safe_mode=True, but call overrides to False
+        engine = ScanEngine(safe_mode=True)
+        engine.register_plugin(DestructivePlugin())
+        results = await engine.scan(target, safe_mode=False)
+        names = [r.plugin_name for r in results]
+        assert "destructive_test3" in names

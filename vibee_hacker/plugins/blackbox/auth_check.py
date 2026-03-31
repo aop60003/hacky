@@ -10,6 +10,8 @@ import httpx
 from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
 from vibee_hacker.core.plugin_base import PluginBase
 
+AUTH_URL_PATTERN = re.compile(r"login|auth|signin|sign-in|password", re.I)
+
 # Cookie names commonly used for session tracking
 SESSION_COOKIE_NAMES = re.compile(
     r"(sessionid|session|sess|sid|auth|token|jsessionid|phpsessid|asp\.net_sessionid)",
@@ -36,6 +38,12 @@ class AuthCheckPlugin(PluginBase):
     base_severity = Severity.HIGH
     detection_criteria = "Session cookie does not change between two successive login requests"
     expected_evidence = "Identical session token returned on first and second login"
+    destructive_level = 1
+
+    def is_applicable(self, target: Target) -> bool:
+        if not target.url:
+            return False
+        return bool(AUTH_URL_PATTERN.search(target.url))
 
     async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
         if not target.url:

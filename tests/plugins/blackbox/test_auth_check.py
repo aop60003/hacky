@@ -83,3 +83,31 @@ class TestAuthCheck:
         target = Target(url=None)
         results = await plugin.run(target)
         assert results == []
+
+    def test_destructive_level_is_one(self, plugin):
+        """auth_check must declare destructive_level=1 so safe_mode can filter it."""
+        assert plugin.destructive_level == 1
+
+    def test_is_applicable_matches_login_url(self, plugin):
+        """is_applicable returns True for login/auth/signin URLs."""
+        for url in [
+            "https://example.com/login",
+            "https://example.com/auth/token",
+            "https://example.com/signin",
+            "https://example.com/sign-in",
+            "https://example.com/password/reset",
+        ]:
+            assert plugin.is_applicable(Target(url=url)), f"Should match: {url}"
+
+    def test_is_applicable_rejects_non_auth_url(self, plugin):
+        """is_applicable returns False for non-auth URLs."""
+        for url in [
+            "https://example.com/",
+            "https://example.com/api/users",
+            "https://example.com/products",
+        ]:
+            assert not plugin.is_applicable(Target(url=url)), f"Should not match: {url}"
+
+    def test_is_applicable_rejects_none_url(self, plugin):
+        """is_applicable returns False when target has no URL."""
+        assert not plugin.is_applicable(Target(url=None))
