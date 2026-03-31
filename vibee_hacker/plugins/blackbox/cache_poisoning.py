@@ -65,13 +65,21 @@ class CachePoisoningPlugin(PluginBase):
 
             # Check if response is cacheable (presence of cache-related headers)
             resp_headers_lower = {k.lower(): v for k, v in resp.headers.items()}
-            is_cacheable = any(h in resp_headers_lower for h in CACHE_INDICATOR_HEADERS)
             cache_control = resp_headers_lower.get("cache-control", "")
+
+            # Skip entirely if explicitly non-cacheable
+            if "no-store" in cache_control or "private" in cache_control:
+                return []
+
+            is_cacheable = any(h in resp_headers_lower for h in CACHE_INDICATOR_HEADERS)
             if "public" in cache_control or "max-age" in cache_control:
                 is_cacheable = True
 
+            # Only report if we can confirm the response is cacheable
+            if not is_cacheable:
+                return []
+
             reflection_location = "response body" if body_reflected else "Location header"
-            cache_note = "cacheable response detected" if is_cacheable else "caching status unknown"
 
             results.append(Result(
                 plugin_name=self.name,
@@ -79,13 +87,13 @@ class CachePoisoningPlugin(PluginBase):
                 title="Cache poisoning: unkeyed header reflected in response",
                 description=(
                     f"The application reflects the injected X-Forwarded-Host value '{EVIL_HOST}' "
-                    f"in the {reflection_location} ({cache_note}). An attacker can inject a "
+                    f"in the {reflection_location} (cacheable response confirmed). An attacker can inject a "
                     f"malicious host and have the poisoned response served to other users from cache, "
                     f"enabling phishing, credential theft, or malicious script injection."
                 ),
                 evidence=(
                     f"'{EVIL_HOST}' reflected in {reflection_location} | "
-                    f"Cache indicators: {cache_note} | Status: {resp.status_code}"
+                    f"Cacheable response confirmed | Status: {resp.status_code}"
                 ),
                 cwe_id="CWE-444",
                 endpoint=target.url,

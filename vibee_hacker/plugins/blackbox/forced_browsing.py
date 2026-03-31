@@ -65,13 +65,17 @@ class ForcedBrowsingPlugin(PluginBase):
                 if len(resp.text) > 1_000_000:
                     continue
 
-                matched_pattern = None
+                matched_patterns: list[str] = []
                 for sig in signatures:
                     if sig.search(resp.text):
-                        matched_pattern = sig.pattern
-                        break
+                        matched_patterns.append(sig.pattern)
 
-                if matched_pattern:
+                # Require at least min(2, total_signatures) matches to reduce false positives
+                required_matches = min(2, len(signatures))
+                if len(matched_patterns) < required_matches:
+                    continue
+
+                if matched_patterns:
                     results.append(Result(
                         plugin_name=self.name,
                         base_severity=self.base_severity,
@@ -81,7 +85,7 @@ class ForcedBrowsingPlugin(PluginBase):
                             f"matches known file signatures. This can expose credentials, configuration "
                             f"details, database dumps, or source control history to attackers."
                         ),
-                        evidence=f"Path: {path} | Signature matched: '{matched_pattern}' | Status: {resp.status_code}",
+                        evidence=f"Path: {path} | Signatures matched: {matched_patterns} | Status: {resp.status_code}",
                         cwe_id="CWE-425",
                         endpoint=endpoint,
                         curl_command=f"curl {shlex.quote(endpoint)}",

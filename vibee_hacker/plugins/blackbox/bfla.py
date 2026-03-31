@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shlex
 from urllib.parse import urlparse
 
@@ -14,11 +16,16 @@ from vibee_hacker.core.plugin_base import PluginBase
 ADMIN_PATHS = [
     "/admin",
     "/api/admin",
-    "/api/users",
     "/api/admin/users",
     "/api/v1/admin",
     "/dashboard/admin",
 ]
+
+# Sensitive JSON keys whose presence indicates real data exposure (not just HTML)
+SENSITIVE_KEYS = re.compile(
+    r'"(email|password|role|token|secret|api_key|access_token|refresh_token)"',
+    re.I,
+)
 
 # Minimum body length to consider a response "substantial"
 MIN_BODY_LENGTH = 10
@@ -34,9 +41,12 @@ class BflaPlugin(PluginBase):
     description = "Detect Broken Function Level Authorization — unauthorized access to admin-level endpoints"
     category = "blackbox"
     phase = 3
-    base_severity = Severity.CRITICAL
-    detection_criteria = "Admin-like path returns 200 with substantial body (unauthenticated or low-privilege)"
-    expected_evidence = "HTTP 200 with non-empty body from admin endpoint without authentication"
+    base_severity = Severity.HIGH
+    detection_criteria = (
+        "Admin-like path returns 200 with JSON Content-Type AND body contains sensitive keys "
+        "(email, password, role, token, etc.) — unauthenticated or low-privilege"
+    )
+    expected_evidence = "HTTP 200 JSON response with sensitive data keys from admin endpoint without authentication"
 
     async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
         if not target.url:
@@ -64,6 +74,13 @@ class BflaPlugin(PluginBase):
                     continue
 
                 if len(resp.text.strip()) < MIN_BODY_LENGTH:
+                    continue
+
+                # Only report if response is JSON with sensitive keys — skip plain HTML 200s
+                content_type = resp.headers.get("content-type", "")
+                if "application/json" not in content_type:
+                    continue
+                if not SENSITIVE_KEYS.search(resp.text):
                     continue
 
                 results.append(Result(

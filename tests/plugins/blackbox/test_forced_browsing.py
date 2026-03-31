@@ -17,12 +17,12 @@ class TestForcedBrowsing:
 
     @pytest.mark.asyncio
     async def test_git_config_found(self, plugin, target, httpx_mock):
-        """/.env with DB_PASSWORD signature found on first probe — reported as HIGH."""
-        # /.env is the first path in SENSITIVE_FILES — make it return 200 with matching signature
+        """/.env with 2+ signatures found on first probe — reported as HIGH."""
+        # /.env is the first path in SENSITIVE_FILES — needs >= 2 signature matches
         httpx_mock.add_response(
             url="https://example.com/.env",
             status_code=200,
-            text="DB_PASSWORD=supersecret\nAPP_KEY=base64:abc123\n",
+            text="DB_PASSWORD=supersecret\nAPP_SECRET=abc123\nAPP_ENV=production\n",
         )
         results = await plugin.run(target)
         assert len(results) >= 1

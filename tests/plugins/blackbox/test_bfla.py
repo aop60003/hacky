@@ -17,16 +17,17 @@ class TestBfla:
 
     @pytest.mark.asyncio
     async def test_admin_path_returns_200_with_data(self, plugin, target, httpx_mock):
-        """/admin returns 200 with data on first probe — reported as CRITICAL."""
+        """/admin returns 200 with JSON sensitive data on first probe — reported as HIGH."""
         # Register /admin as immediately returning 200 (first path tried)
         httpx_mock.add_response(
             url="https://example.com/admin",
             status_code=200,
-            text='{"users": [{"id": 1, "role": "admin"}]}',
+            text='{"users": [{"id": 1, "email": "admin@example.com", "role": "admin"}]}',
+            headers={"Content-Type": "application/json"},
         )
         results = await plugin.run(target)
         assert len(results) >= 1
-        assert results[0].base_severity == Severity.CRITICAL
+        assert results[0].base_severity == Severity.HIGH
         assert results[0].rule_id == "bfla_admin_access"
         assert results[0].cwe_id == "CWE-285"
 
