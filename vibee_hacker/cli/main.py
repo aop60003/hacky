@@ -11,7 +11,7 @@ from rich.table import Table
 
 from vibee_hacker import __version__
 from vibee_hacker.core.engine import ScanEngine
-from vibee_hacker.core.models import Target
+from vibee_hacker.core.models import Result, Target
 from vibee_hacker.core.plugin_loader import PluginLoader
 
 console = Console()
@@ -58,9 +58,12 @@ def cli():
     type=click.Choice(["stealth", "default", "aggressive", "ci"]),
     help="Scan profile preset (stealth/default/aggressive/ci)",
 )
+@click.option("--save-session", type=str, default=None, help="Save scan session with given ID")
+@click.option("--resume", type=click.Path(exists=True), default=None, help="Resume scan from session file path")
 def scan(
     target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet,
     proxy, safe_mode, concurrency, delay, insecure, profile,
+    save_session, resume,
 ):
     """Run a security scan against a target."""
     # Apply profile presets first; explicit flags override them
@@ -99,7 +102,77 @@ def scan(
     phases = list(phase) if phase else None
     plugin_names = [n.strip() for n in plugin.split(",")] if plugin else None
 
+    # Session management: load existing session if --resume provided
+    from vibee_hacker.core.session import ScanSession, SessionManager
+
+    active_session: ScanSession | None = None
+    if resume:
+        sm = SessionManager()
+        try:
+            active_session = sm.load(resume)
+            if not quiet:
+                console.print(f"[cyan]Resuming session {active_session.session_id} "
+                              f"(skipping {len(active_session.completed_plugins)} completed plugins)[/cyan]")
+            # Exclude already-completed plugins from this run
+            skip_set = set(active_session.completed_plugins)
+            if plugin_names:
+                plugin_names = [p for p in plugin_names if p not in skip_set]
+            else:
+                all_names = [p.name for p in loader.plugins]
+                plugin_names = [p for p in all_names if p not in skip_set]
+        except (ValueError, FileNotFoundError) as exc:
+            console.print(f"[red]Failed to load session: {exc}[/red]")
+            raise SystemExit(1)
+
     results = asyncio.run(engine.scan(t, phases=phases, plugins=plugin_names))
+
+    # Merge resumed results with new results
+    if active_session is not None:
+        from vibee_hacker.core.models import Severity
+        prior: list = []
+        for rd in active_session.results:
+            # Reconstruct lightweight Result objects for reporting
+            prior_r = Result(
+                plugin_name=rd.get("plugin_name", ""),
+                base_severity=Severity[rd.get("base_severity", "info").upper()],
+                title=rd.get("title", ""),
+                description=rd.get("description", ""),
+                evidence=rd.get("evidence", ""),
+                recommendation=rd.get("recommendation", ""),
+                endpoint=rd.get("endpoint", ""),
+                confidence=rd.get("confidence", "tentative"),
+            )
+            prior.append(prior_r)
+        results = prior + results
+
+    # Build / update session if --save-session provided
+    if save_session:
+        sm = SessionManager()
+        if active_session is None:
+            active_session = ScanSession(
+                session_id=save_session,
+                target=target,
+                mode=mode,
+                options={
+                    "timeout": timeout,
+                    "safe_mode": safe_mode,
+                    "concurrency": concurrency,
+                },
+            )
+        else:
+            active_session.session_id = save_session
+
+        # Record all completed plugin names from this run
+        run_plugins = plugin_names or [p.name for p in loader.plugins]
+        for pname in run_plugins:
+            active_session.mark_plugin_complete(pname)
+
+        # Replace results with the full merged set
+        active_session.results = [r.to_dict() for r in results]
+        active_session.status = "completed"
+        path = sm.save(active_session)
+        if not quiet:
+            console.print(f"[green]Session saved to {path}[/green]")
 
     if output:
         if fmt == "html":
