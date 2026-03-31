@@ -95,7 +95,7 @@ class CloudStorageExposurePlugin(PluginBase):
                     body = bucket_resp.text
                     is_public = any(indicator in body for indicator in PUBLIC_INDICATORS)
 
-                    if is_public or len(body) > 100:
+                    if is_public:
                         results.append(Result(
                             plugin_name=self.name,
                             base_severity=self.base_severity,

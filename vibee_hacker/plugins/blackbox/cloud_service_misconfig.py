@@ -29,13 +29,13 @@ class CloudServiceMisconfigPlugin(PluginBase):
     name = "cloud_service_misconfig"
     description = (
         "Probe cloud-specific endpoints for misconfigurations: "
-        "Firebase .json, AWS metadata, Kubernetes dashboard"
+        "Firebase .json, Kubernetes dashboard"
     )
     category = "blackbox"
     phase = 1
     base_severity = Severity.CRITICAL
     detection_criteria = (
-        "Firebase /.json returns data, AWS metadata accessible, "
+        "Firebase /.json returns data, "
         "or Kubernetes dashboard open without auth"
     )
     expected_evidence = "Cloud metadata/data returned without authentication"
@@ -85,38 +85,6 @@ class CloudServiceMisconfigPlugin(PluginBase):
                         return results
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                     return []
-
-            # --- AWS IMDS: probe http://169.254.169.254/latest/meta-data/ ---
-            # Only relevant for server-side SSRF scenarios
-            aws_metadata_url = "http://169.254.169.254/latest/meta-data/"
-            try:
-                aws_resp = await client.get(aws_metadata_url)
-                if aws_resp.status_code == 200 and len(aws_resp.text) > 10:
-                    results.append(Result(
-                        plugin_name=self.name,
-                        base_severity=self.base_severity,
-                        title="AWS Instance Metadata Service (IMDS) accessible",
-                        description=(
-                            "The AWS EC2 Instance Metadata Service (IMDS) at "
-                            f"'{aws_metadata_url}' is directly accessible. "
-                            "This may be exploitable via SSRF to extract IAM credentials."
-                        ),
-                        evidence=(
-                            f"GET {aws_metadata_url} → {aws_resp.status_code} | "
-                            f"Body: {aws_resp.text[:200]}"
-                        ),
-                        recommendation=(
-                            "Enforce IMDSv2 (require session tokens). "
-                            "Block access to 169.254.169.254 from untrusted network paths. "
-                            "Apply WAF rules against SSRF to metadata endpoints."
-                        ),
-                        cwe_id="CWE-16",
-                        endpoint=aws_metadata_url,
-                        curl_command=f"curl -v {shlex.quote(aws_metadata_url)}",
-                        rule_id="cloud_misconfig_aws_imds",
-                    ))
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                pass
 
             # --- Kubernetes Dashboard: probe /api/v1/namespaces ---
             k8s_url = base.rstrip("/") + "/api/v1/namespaces"

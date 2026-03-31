@@ -17,6 +17,17 @@ RACE_URL_PATTERN = re.compile(r"/order|/transfer|/buy|/redeem|/coupon|/apply", r
 CONCURRENT_REQUESTS = 5
 
 
+def _normalize(text: str) -> str:
+    """Strip dynamic fields before comparing response bodies to avoid FPs."""
+    # Remove timestamps
+    text = re.sub(r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.\d]*Z?', 'TIMESTAMP', text)
+    # Remove UUIDs
+    text = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'UUID', text)
+    # Remove CSRF tokens, nonces, and similar dynamic fields
+    text = re.sub(r'"(?:csrf|nonce|token|_token)":\s*"[^"]*"', '"DYNAMIC":"NORMALIZED"', text)
+    return text
+
+
 class RaceConditionPlugin(PluginBase):
     name = "race_condition"
     description = "Detect race conditions by sending concurrent identical requests and comparing responses"
@@ -53,8 +64,8 @@ class RaceConditionPlugin(PluginBase):
         if len(valid_responses) < 2:
             return []
 
-        # Compare response bodies - if any differ, possible race condition
-        bodies = [r.text for r in valid_responses]
+        # Compare normalized response bodies - if any differ, possible race condition
+        bodies = [_normalize(r.text) for r in valid_responses]
         unique_bodies = set(bodies)
 
         if len(unique_bodies) > 1:

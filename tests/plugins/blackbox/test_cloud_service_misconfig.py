@@ -38,12 +38,6 @@ class TestCloudServiceMisconfig:
             status_code=401,
             text='{"error": "Permission denied"}',
         )
-        # AWS IMDS probe (404 or transport error from mock)
-        httpx_mock.add_response(
-            url="http://169.254.169.254/latest/meta-data/",
-            status_code=404,
-            text="Not found",
-        )
         # Kubernetes probe
         httpx_mock.add_response(
             url="https://myapp.firebaseio.com/api/v1/namespaces",
