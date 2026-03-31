@@ -27,6 +27,8 @@ class Target:
     path: str | None = None
     mode: str = "blackbox"
     verify_ssl: bool = True
+    proxy: str | None = None
+    delay: int = 0
 
     @property
     def host(self) -> str | None:
