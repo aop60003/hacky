@@ -33,7 +33,7 @@ def cli():
 @click.option("--plugin", type=str, help="Comma-separated plugin names")
 @click.option("--output", "-o", type=click.Path(), help="Output file path")
 @click.option(
-    "--format", "fmt", default="json", type=click.Choice(["json"])
+    "--format", "fmt", default="json", type=click.Choice(["json", "html"])
 )
 @click.option("--timeout", default=60, type=int, help="Per-plugin timeout (seconds)")
 @click.option(
@@ -60,8 +60,12 @@ def scan(target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet):
     results = asyncio.run(engine.scan(t, phases=phases, plugins=plugin_names))
 
     if output:
-        from vibee_hacker.reports.json_report import JsonReporter
-        reporter = JsonReporter()
+        if fmt == "html":
+            from vibee_hacker.reports.html_report import HtmlReporter
+            reporter = HtmlReporter()
+        else:
+            from vibee_hacker.reports.json_report import JsonReporter
+            reporter = JsonReporter()
         reporter.generate(results, t, output)
         if not quiet:
             console.print(f"[green]Results saved to {output}[/green]")
