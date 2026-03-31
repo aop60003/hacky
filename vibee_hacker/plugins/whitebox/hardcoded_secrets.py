@@ -5,10 +5,9 @@ import math
 import re
 from pathlib import Path
 
+from vibee_hacker.core.file_utils import MAX_FILE_SIZE, should_skip
 from vibee_hacker.core.models import InterPhaseContext, Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
-
-SKIP_DIRS = ["node_modules", "venv", ".git", "dist", "build", "__pycache__", ".tox", "vendor"]
 
 # Regex patterns for known secret formats
 SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
@@ -44,9 +43,6 @@ def _is_false_positive(line: str) -> bool:
     return any(pat.search(line) for pat in FP_PATTERNS)
 
 
-def _should_skip(path: Path) -> bool:
-    return any(skip in path.parts for skip in SKIP_DIRS)
-
 
 class HardcodedSecretsPlugin(PluginBase):
     name = "hardcoded_secrets"
@@ -66,13 +62,13 @@ class HardcodedSecretsPlugin(PluginBase):
         results: list[Result] = []
 
         for src_file in root.rglob("*"):
-            if not src_file.is_file() or _should_skip(src_file):
+            if not src_file.is_file() or should_skip(src_file):
                 continue
             # Only scan text-like files
             if src_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".ico", ".bin", ".exe", ".pyc"):
                 continue
             try:
-                if src_file.stat().st_size > 5_000_000:
+                if src_file.stat().st_size > MAX_FILE_SIZE:
                     continue
                 content = src_file.read_text(errors="ignore")
             except OSError:

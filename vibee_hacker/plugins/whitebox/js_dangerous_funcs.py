@@ -4,10 +4,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from vibee_hacker.core.file_utils import MAX_FILE_SIZE, should_skip
 from vibee_hacker.core.models import InterPhaseContext, Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
 
-SKIP_DIRS = ["node_modules", "venv", ".git", "dist", "build", "__pycache__", ".tox", "vendor"]
 JS_EXTENSIONS = {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"}
 
 DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
@@ -20,9 +20,6 @@ DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("setInterval with string", re.compile(r'\bsetInterval\s*\(\s*["\']')),
 ]
 
-
-def _should_skip(path: Path) -> bool:
-    return any(skip in path.parts for skip in SKIP_DIRS)
 
 
 class JsDangerousFuncsPlugin(PluginBase):
@@ -45,10 +42,10 @@ class JsDangerousFuncsPlugin(PluginBase):
         for src_file in root.rglob("*"):
             if not src_file.is_file() or src_file.suffix.lower() not in JS_EXTENSIONS:
                 continue
-            if _should_skip(src_file):
+            if should_skip(src_file):
                 continue
             try:
-                if src_file.stat().st_size > 5_000_000:
+                if src_file.stat().st_size > MAX_FILE_SIZE:
                     continue
                 content = src_file.read_text(errors="ignore")
             except OSError:

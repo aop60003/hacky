@@ -4,10 +4,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from vibee_hacker.core.file_utils import MAX_FILE_SIZE, should_skip
 from vibee_hacker.core.models import InterPhaseContext, Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
-
-SKIP_DIRS = ["node_modules", "venv", ".git", "dist", "build", "__pycache__", ".tox", "vendor"]
 
 SQL_KEYWORDS = re.compile(r'\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC)\b', re.IGNORECASE)
 
@@ -25,9 +24,6 @@ DANGEROUS_SQL_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("cursor.execute concat", re.compile(r'cursor\.execute\s*\(\s*["\'].*\+', re.IGNORECASE)),
 ]
 
-
-def _should_skip(path: Path) -> bool:
-    return any(skip in path.parts for skip in SKIP_DIRS)
 
 
 class PySqlPatternPlugin(PluginBase):
@@ -48,10 +44,10 @@ class PySqlPatternPlugin(PluginBase):
         results: list[Result] = []
 
         for src_file in root.rglob("*.py"):
-            if not src_file.is_file() or _should_skip(src_file):
+            if not src_file.is_file() or should_skip(src_file):
                 continue
             try:
-                if src_file.stat().st_size > 5_000_000:
+                if src_file.stat().st_size > MAX_FILE_SIZE:
                     continue
                 content = src_file.read_text(errors="ignore")
             except OSError:

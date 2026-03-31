@@ -4,10 +4,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from vibee_hacker.core.file_utils import MAX_FILE_SIZE, should_skip
 from vibee_hacker.core.models import InterPhaseContext, Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
-
-SKIP_DIRS = ["node_modules", "venv", ".git", "dist", "build", "__pycache__", ".tox", "vendor"]
 
 # (label, pattern, cwe)
 DANGEROUS_PATTERNS: list[tuple[str, re.Pattern, str]] = [
@@ -22,9 +21,6 @@ DANGEROUS_PATTERNS: list[tuple[str, re.Pattern, str]] = [
     ("__import__()", re.compile(r'\b__import__\s*\('), "CWE-94"),
 ]
 
-
-def _should_skip(path: Path) -> bool:
-    return any(skip in path.parts for skip in SKIP_DIRS)
 
 
 class PyDangerousFuncsPlugin(PluginBase):
@@ -45,10 +41,10 @@ class PyDangerousFuncsPlugin(PluginBase):
         results: list[Result] = []
 
         for src_file in root.rglob("*.py"):
-            if not src_file.is_file() or _should_skip(src_file):
+            if not src_file.is_file() or should_skip(src_file):
                 continue
             try:
-                if src_file.stat().st_size > 5_000_000:
+                if src_file.stat().st_size > MAX_FILE_SIZE:
                     continue
                 content = src_file.read_text(errors="ignore")
             except OSError:
