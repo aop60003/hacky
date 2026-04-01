@@ -47,7 +47,7 @@ class _LinkParser(HTMLParser):
                 "method": attr_dict.get("method", "GET").upper(),
             }
             self._current_fields = []
-        elif tag == "input" and self._current_form is not None:
+        elif tag in ("input", "textarea", "select") and self._current_form is not None:
             name = attr_dict.get("name", "")
             if name:
                 self._current_fields.append(name)

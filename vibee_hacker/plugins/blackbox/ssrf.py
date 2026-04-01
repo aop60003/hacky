@@ -18,6 +18,12 @@ SSRF_PAYLOADS = [
     "http://169.254.169.254/latest/meta-data/",
     "http://[::1]",
     "http://localhost",
+    "http://0177.0.0.1",           # octal
+    "http://2130706433",            # decimal IP
+    "http://0x7f000001",            # hex IP
+    "http://127.0.0.1.nip.io",     # DNS rebinding
+    "http://metadata.google.internal/computeMetadata/v1/",  # GCP
+    "http://169.254.169.254/metadata/instance?api-version=2021-02-01",  # Azure
 ]
 
 # Patterns that indicate SSRF success (internal data returned)

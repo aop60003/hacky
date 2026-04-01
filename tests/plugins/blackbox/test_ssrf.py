@@ -76,8 +76,8 @@ class TestSsrfPlugin:
     async def test_no_ssrf_identical_response(self, plugin, target, httpx_mock):
         """If all responses are identical to baseline, no SSRF is flagged."""
         normal_body = "<html>Normal page nothing internal here</html>"
-        # Return the same normal page for baseline + all payloads (1 + 4 = 5)
-        for _ in range(5):
+        # Return the same normal page for baseline + all payloads (1 + 10 = 11)
+        for _ in range(11):
             httpx_mock.add_response(text=normal_body)
         results = await plugin.run(target)
         assert len(results) == 0
@@ -91,7 +91,7 @@ class TestSsrfPlugin:
             text="<html>Normal page</html>",
         )
         # Different but safe responses (no metadata patterns), one per payload
-        for _ in range(4):
+        for _ in range(10):
             httpx_mock.add_response(text="<html>Error: invalid URL scheme</html>")
         results = await plugin.run(target)
         assert len(results) == 0
@@ -125,8 +125,8 @@ class TestSsrfPlugin:
             url="https://example.com/fetch?url=https://example.com",
             text="<html>Normal page</html>",
         )
-        # All payload requests fail
-        for _ in range(4):
+        # All payload requests fail (10 payloads now)
+        for _ in range(10):
             httpx_mock.add_exception(httpx.ConnectTimeout("timed out"))
         results = await plugin.run(target)
         assert results == []
@@ -138,8 +138,9 @@ class TestSsrfPlugin:
         # Build URL with 15 params
         params = "&".join(f"p{i}=v{i}" for i in range(15))
         target = Target(url=f"https://example.com/page?{params}")
-        # Register more responses than needed; excess unused ones are tolerated
-        for _ in range(50):
+        # Register enough responses: 1 baseline + MAX_PARAMS(10) * len(SSRF_PAYLOADS)(10) = 101
+        # Use 110 to have a safe margin; excess unused ones are tolerated (assert_all_responses_were_requested=False)
+        for _ in range(110):
             httpx_mock.add_response(text="<html>Safe</html>")
         results = await plugin.run(target)
         assert results == []

@@ -103,7 +103,7 @@ class ScanEngine:
         for form in source_ctx.crawl_forms:
             key = (form.get("action", ""), form.get("method", ""))
             if key not in existing_crawl_forms:
-                target_ctx.crawl_forms.append(form)
+                target_ctx.crawl_forms.append(dict(form))  # shallow copy
                 existing_crawl_forms.add(key)
         for url, param_list in source_ctx.crawl_parameters.items():
             if url not in target_ctx.crawl_parameters:

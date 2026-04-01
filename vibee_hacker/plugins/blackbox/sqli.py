@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import statistics
 import time
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -32,7 +33,7 @@ TIME_BASED_PAYLOADS = [
     "' OR SLEEP(3)--",
     "'; WAITFOR DELAY '0:0:3'--",
 ]
-TIME_BASED_THRESHOLD = 3.0  # seconds; flag if response takes >3s longer than baseline
+TIME_BASED_EXTRA_MARGIN = 2.5  # flag if response is >2.5s slower than baseline median
 
 
 class SqliPlugin(PluginBase):
@@ -102,7 +103,16 @@ class SqliPlugin(PluginBase):
                             return results  # Stop on first confirmed finding
 
             # --- Time-based blind SQLi detection ---
-            baseline_time = baseline_resp.elapsed.total_seconds() if hasattr(baseline_resp, 'elapsed') and baseline_resp.elapsed else 0.0
+            # Measure baseline 3 times and use the median for a stable reference
+            baseline_samples: list[float] = []
+            for _ in range(3):
+                try:
+                    t0 = time.monotonic()
+                    await client.get(target.url)
+                    baseline_samples.append(time.monotonic() - t0)
+                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                    pass
+            baseline_median = statistics.median(baseline_samples) if baseline_samples else 0.0
 
             for param_name, values in params.items():
                 original_value = values[0] if values else ""
@@ -118,17 +128,33 @@ class SqliPlugin(PluginBase):
                     except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                         continue
 
-                    delay = elapsed - baseline_time
-                    if delay > TIME_BASED_THRESHOLD:
+                    delay = elapsed - baseline_median
+                    if delay > TIME_BASED_EXTRA_MARGIN:
+                        # Confirmation request: only report if second attempt is also slow
+                        try:
+                            t_confirm = time.monotonic()
+                            await client.get(test_url, timeout=15)
+                            confirm_elapsed = time.monotonic() - t_confirm
+                        except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                            continue
+
+                        confirm_delay = confirm_elapsed - baseline_median
+                        if confirm_delay <= TIME_BASED_EXTRA_MARGIN:
+                            continue  # First hit was a fluke; skip
+
                         results.append(Result(
                             plugin_name=self.name,
                             base_severity=self.base_severity,
                             title=f"Time-Based Blind SQL Injection in parameter '{param_name}'",
                             description=(
                                 f"Time-based blind SQLi detected with payload: {payload}. "
-                                f"Response delayed {delay:.1f}s (threshold: {TIME_BASED_THRESHOLD}s)."
+                                f"Response delayed {delay:.1f}s above baseline median {baseline_median:.2f}s "
+                                f"(confirmed: {confirm_elapsed:.2f}s)."
                             ),
-                            evidence=f"Response time: {elapsed:.2f}s, baseline: {baseline_time:.2f}s, delay: {delay:.2f}s",
+                            evidence=(
+                                f"Response time: {elapsed:.2f}s, baseline median: {baseline_median:.2f}s, "
+                                f"delay: {delay:.2f}s, confirmation delay: {confirm_delay:.2f}s"
+                            ),
                             cwe_id="CWE-89",
                             endpoint=target.url,
                             param_name=param_name,
