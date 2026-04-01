@@ -113,7 +113,11 @@ class Crawler:
     async def crawl(self, start_url: str, auth_headers: dict[str, str] | None = None) -> CrawlResult:
         result = CrawlResult()
         visited: set[str] = set()
-        base_domain = urlparse(start_url).netloc
+        parsed_start = urlparse(start_url)
+        base_domain = parsed_start.netloc
+        # Allow crawling any URL on the same host as the start URL, even if that
+        # host resolves to a private/loopback address (the user explicitly targeted it).
+        start_hostname = parsed_start.hostname or ""
         queue: deque[tuple[str, int]] = deque([(start_url, 0)])
 
         # Merge instance-level auth_headers with any passed per-call headers
@@ -130,8 +134,10 @@ class Crawler:
                 if url in visited or depth > self.max_depth:
                     continue
 
-                # Allow the start URL (user explicitly chose it), block SSRF for discovered links
-                if url != start_url and not self._is_safe_url(url):
+                # Allow the start URL (user explicitly chose it) and links to the
+                # same host, block SSRF only for cross-host discovered links.
+                url_hostname = urlparse(url).hostname or ""
+                if url != start_url and url_hostname != start_hostname and not self._is_safe_url(url):
                     continue
 
                 visited.add(url)

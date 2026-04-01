@@ -14,6 +14,16 @@ EVIL_ORIGINS = [
     "null",
 ]
 
+# Common API paths that may not be linked from the HTML but are worth probing.
+# These are probed in addition to crawled URLs to catch unlinked endpoints.
+API_PROBE_PATHS = [
+    "/api/data",
+    "/api/v1",
+    "/api/v2",
+    "/api/graphql",
+    "/api/config",
+]
+
 
 class CorsCheckPlugin(PluginBase):
     name = "cors_check"
@@ -27,6 +37,10 @@ class CorsCheckPlugin(PluginBase):
         if not target.url:
             return []
 
+        from urllib.parse import urlparse
+        parsed_base = urlparse(target.url)
+        base_url = f"{parsed_base.scheme}://{parsed_base.netloc}"
+
         # Build list of URLs to test: start URL + crawled URLs + crawled API endpoints
         urls_to_test: list[str] = [target.url]
         if context:
@@ -37,6 +51,12 @@ class CorsCheckPlugin(PluginBase):
             for api_url in list((context.crawl_parameters or {}).keys())[:10]:
                 if api_url not in urls_to_test:
                     urls_to_test.append(api_url)
+
+        # Also probe common unlinked API paths that may not appear in the crawl
+        for api_path in API_PROBE_PATHS:
+            probe_url = base_url + api_path
+            if probe_url not in urls_to_test:
+                urls_to_test.append(probe_url)
 
         results = []
         seen_rule_ids: set[str] = set()

@@ -15,6 +15,7 @@ class TestCorsCheck:
         return Target(url="https://example.com")
 
     @pytest.mark.asyncio
+    @pytest.mark.httpx_mock(assert_all_requests_were_expected=False)
     async def test_wildcard_origin_reflected(self, plugin, target, httpx_mock):
         # First origin (https://evil.com) is reflected; others return no CORS headers
         httpx_mock.add_response(
@@ -28,6 +29,7 @@ class TestCorsCheck:
         assert results[0].base_severity == Severity.HIGH
 
     @pytest.mark.asyncio
+    @pytest.mark.httpx_mock(assert_all_requests_were_expected=False)
     async def test_no_cors_headers(self, plugin, target, httpx_mock):
         for _ in range(len(EVIL_ORIGINS)):
             httpx_mock.add_response(url="https://example.com", headers={})
@@ -35,6 +37,7 @@ class TestCorsCheck:
         assert len(results) == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.httpx_mock(assert_all_requests_were_expected=False)
     async def test_wildcard_with_credentials(self, plugin, target, httpx_mock):
         for _ in range(len(EVIL_ORIGINS)):
             httpx_mock.add_response(

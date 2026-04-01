@@ -13,6 +13,16 @@ from vibee_hacker.core.plugin_base import PluginBase
 # Common paths that often set session cookies (e.g. login page loads)
 COOKIE_PATHS = ["/login", "/signin", "/auth", "/register", "/signup", "/api/auth"]
 
+# Login-like paths to attempt with common credentials via POST
+LOGIN_PATHS = ["/login", "/signin", "/auth"]
+
+# Common credentials to try when POSTing to login endpoints
+LOGIN_CREDS = [
+    {"username": "admin", "password": "admin"},
+    {"username": "test", "password": "test"},
+    {"username": "admin", "password": "password"},
+]
+
 
 def _parse_cookie_attrs(cookie_header: str) -> dict[str, str | bool]:
     """Parse a Set-Cookie header string into a dict of attribute -> value."""
@@ -65,7 +75,7 @@ class CookieSecurityPlugin(PluginBase):
             except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 pass
 
-            # Also probe common cookie-setting paths
+            # Also probe common cookie-setting paths via GET
             for path in COOKIE_PATHS:
                 probe_url = base_url + path
                 if probe_url == target.url:
@@ -77,6 +87,25 @@ class CookieSecurityPlugin(PluginBase):
                             all_cookies.append((v, probe_url))
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                     continue
+
+            # Try POST to login-like paths with common credentials to trigger Set-Cookie
+            # (many apps only set session cookies after a successful POST login)
+            for path in LOGIN_PATHS:
+                login_url = base_url + path
+                for creds in LOGIN_CREDS:
+                    try:
+                        post_resp = await client.post(login_url, data=creds)
+                        for k, v in post_resp.headers.multi_items():
+                            if k.lower() == "set-cookie":
+                                all_cookies.append((v, login_url))
+                        # Stop trying more creds for this path if we got a cookie
+                        if any(
+                            k.lower() == "set-cookie"
+                            for k, _ in post_resp.headers.multi_items()
+                        ):
+                            break
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                        continue
 
         if not all_cookies:
             return []
