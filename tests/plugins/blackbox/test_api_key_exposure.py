@@ -16,12 +16,12 @@ class TestApiKeyExposure:
         return Target(url="https://example.com")
 
     @pytest.mark.asyncio
-    async def test_stripe_key_in_response(self, plugin, target, httpx_mock):
-        """Stripe secret key found directly in HTML response."""
+    async def test_api_key_in_response(self, plugin, target, httpx_mock):
+        """Generic API key found directly in HTML response."""
         httpx_mock.add_response(
             url="https://example.com",
             status_code=200,
-            text='<html><body>stripe_key = "sk_test_FAKE_KEY_FOR_UNIT_TESTING_01234567890abcdef"</body></html>',
+            text='<html><body>api_key = "abcdefghijklmnopqrstuvwxyz123456"</body></html>',
             headers={"content-type": "text/html"},
         )
         results = await plugin.run(target)
