@@ -6,8 +6,9 @@ import asyncio
 import copy
 import logging
 from collections import defaultdict
+from urllib.parse import urlparse
 
-from vibee_hacker.core.models import Target, Result, InterPhaseContext
+from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
 from vibee_hacker.core.plugin_base import PluginBase
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,31 @@ class ScanEngine:
             results = await self._run_phase(target, phase_plugins, context)
             all_results.extend(results)
 
+        # Deduplicate results by (plugin_name, rule_id, param_name, endpoint_path)
+        seen: set[tuple[str, str, str, str]] = set()
+        deduped: list[Result] = []
+        for r in all_results:
+            key = (
+                r.plugin_name,
+                r.rule_id or "",
+                r.param_name or "",
+                urlparse(r.endpoint).path if r.endpoint else "",
+            )
+            if key not in seen:
+                seen.add(key)
+                deduped.append(r)
+        all_results = deduped
+
+        # Notify user if crawler failed (reduced coverage)
+        if target.mode == "blackbox" and context.crawl_status == "failed":
+            all_results.append(Result(
+                plugin_name="crawler",
+                base_severity=Severity.INFO,
+                title="Crawler failed — reduced scan coverage",
+                description="The web crawler could not complete. Some endpoints may not have been tested.",
+                plugin_status="failed",
+            ))
+
         all_results.sort(key=lambda r: r.base_severity, reverse=True)
         return all_results
 
@@ -81,10 +107,9 @@ class ScanEngine:
                 len(crawl_result.urls),
                 len(crawl_result.forms),
             )
-        except asyncio.TimeoutError:
-            logger.warning("Auto-crawler timed out after %ds", _CRAWLER_TIMEOUT)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Auto-crawler failed: %s", exc)
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.warning("Crawler failed: %s", e)
+            context.crawl_status = "failed"
 
     async def _run_phase(
         self, target: Target, plugins: list[PluginBase], context: InterPhaseContext | None = None

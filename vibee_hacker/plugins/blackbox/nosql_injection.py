@@ -38,7 +38,7 @@ class NoSqlInjectionPlugin(PluginBase):
         # Build list of URLs to test: start URL + crawled URLs that have query params
         urls_to_test: list[str] = [target.url]
         if context:
-            for crawled_url in (context.crawl_urls or [])[:20]:
+            for crawled_url in (context.crawl_urls or [])[:10]:
                 if crawled_url != target.url and "?" in crawled_url:
                     urls_to_test.append(crawled_url)
 

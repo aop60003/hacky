@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from collections import deque
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -88,6 +90,26 @@ class Crawler:
         self.verify_ssl = verify_ssl
         self.auth_headers = auth_headers
 
+    def _is_safe_url(self, url: str) -> bool:
+        """Block internal/private IP addresses to prevent SSRF."""
+        try:
+            hostname = urlparse(url).hostname
+            if not hostname:
+                return False
+            # Resolve hostname to IP
+            ip_str = socket.gethostbyname(hostname)
+            ip = ipaddress.ip_address(ip_str)
+            # Block private, loopback, link-local, reserved
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+            return True
+        except socket.gaierror:
+            # If hostname cannot be resolved, allow it — it is not a known private IP.
+            # The HTTP client will fail the request safely if the host is truly unreachable.
+            return True
+        except ValueError:
+            return False
+
     async def crawl(self, start_url: str, auth_headers: dict[str, str] | None = None) -> CrawlResult:
         result = CrawlResult()
         visited: set[str] = set()
@@ -107,6 +129,11 @@ class Crawler:
 
                 if url in visited or depth > self.max_depth:
                     continue
+
+                # Allow the start URL (user explicitly chose it), block SSRF for discovered links
+                if url != start_url and not self._is_safe_url(url):
+                    continue
+
                 visited.add(url)
 
                 try:
@@ -153,12 +180,16 @@ class Crawler:
                     if abs_api not in result.api_endpoints:
                         result.api_endpoints.append(abs_api)
 
-                # Follow links (same domain only)
+                # Follow links (same domain only, safe URLs only)
                 if depth < self.max_depth:
                     for link in parser.links:
                         abs_link = urljoin(url, link)
                         link_domain = urlparse(abs_link).netloc
-                        if link_domain == base_domain and abs_link not in visited:
+                        if (
+                            link_domain == base_domain
+                            and abs_link not in visited
+                            and self._is_safe_url(abs_link)
+                        ):
                             queue.append((abs_link, depth + 1))
 
         return result

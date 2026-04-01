@@ -108,3 +108,4 @@ class InterPhaseContext:
     crawl_urls: list[str] = field(default_factory=list)
     crawl_forms: list[dict] = field(default_factory=list)
     crawl_parameters: dict[str, list[str]] = field(default_factory=dict)
+    crawl_status: str = "ok"
