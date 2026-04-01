@@ -35,6 +35,8 @@ TIME_BASED_PAYLOADS = [
 ]
 TIME_BASED_EXTRA_MARGIN = 2.5  # flag if response is >2.5s slower than baseline median
 
+MAX_PARAMS = 10
+
 
 class SqliPlugin(PluginBase):
     name = "sqli"
@@ -51,12 +53,6 @@ class SqliPlugin(PluginBase):
 
         parsed = urlparse(target.url)
         params = parse_qs(parsed.query)
-        if not params:
-            return []
-
-        MAX_PARAMS = 10
-        if len(params) > MAX_PARAMS:
-            params = dict(list(params.items())[:MAX_PARAMS])
 
         results = []
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
@@ -69,98 +65,151 @@ class SqliPlugin(PluginBase):
             # Skip patterns that already fire on the baseline (pre-existing errors)
             baseline_matched_patterns = {p for p in SQL_ERROR_PATTERNS if p.search(baseline_resp.text)}
 
-            for param_name, values in params.items():
-                original_value = values[0] if values else ""
-                for payload in PAYLOADS:
-                    test_params = {k: v[0] for k, v in params.items()}
-                    test_params[param_name] = original_value + payload
-                    test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+            # --- GET parameter fuzzing ---
+            if params:
+                capped_params = dict(list(params.items())[:MAX_PARAMS])
 
-                    try:
-                        resp = await client.get(test_url)
-                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                        continue
+                for param_name, values in capped_params.items():
+                    original_value = values[0] if values else ""
+                    for payload in PAYLOADS:
+                        test_params = {k: v[0] for k, v in capped_params.items()}
+                        test_params[param_name] = original_value + payload
+                        test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
 
-                    if len(resp.text) > 1_000_000:  # 1MB max response
-                        continue
-
-                    for pattern in SQL_ERROR_PATTERNS:
-                        if pattern in baseline_matched_patterns:
+                        try:
+                            resp = await client.get(test_url)
+                        except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                             continue
-                        if pattern.search(resp.text):
+
+                        if len(resp.text) > 1_000_000:  # 1MB max response
+                            continue
+
+                        for pattern in SQL_ERROR_PATTERNS:
+                            if pattern in baseline_matched_patterns:
+                                continue
+                            if pattern.search(resp.text):
+                                results.append(Result(
+                                    plugin_name=self.name,
+                                    base_severity=self.base_severity,
+                                    title=f"SQL Injection in parameter '{param_name}'",
+                                    description=f"Error-based SQLi detected with payload: {payload}",
+                                    evidence=pattern.pattern,
+                                    cwe_id="CWE-89",
+                                    endpoint=target.url,
+                                    param_name=param_name,
+                                    curl_command=f"curl {shlex.quote(test_url)}",
+                                    rule_id="sqli_error_based",
+                                ))
+                                return results  # Stop on first confirmed finding
+
+                # --- Time-based blind SQLi detection ---
+                # Measure baseline 3 times and use the median for a stable reference
+                baseline_samples: list[float] = []
+                for _ in range(3):
+                    try:
+                        t0 = time.monotonic()
+                        await client.get(target.url)
+                        baseline_samples.append(time.monotonic() - t0)
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                        pass
+                baseline_median = statistics.median(baseline_samples) if baseline_samples else 0.0
+
+                for param_name, values in capped_params.items():
+                    original_value = values[0] if values else ""
+                    for payload in TIME_BASED_PAYLOADS:
+                        test_params = {k: v[0] for k, v in capped_params.items()}
+                        test_params[param_name] = original_value + payload
+                        test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+
+                        try:
+                            t_start = time.monotonic()
+                            resp = await client.get(test_url, timeout=15)
+                            elapsed = time.monotonic() - t_start
+                        except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                            continue
+
+                        delay = elapsed - baseline_median
+                        if delay > TIME_BASED_EXTRA_MARGIN:
+                            # Confirmation request: only report if second attempt is also slow
+                            try:
+                                t_confirm = time.monotonic()
+                                await client.get(test_url, timeout=15)
+                                confirm_elapsed = time.monotonic() - t_confirm
+                            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                                continue
+
+                            confirm_delay = confirm_elapsed - baseline_median
+                            if confirm_delay <= TIME_BASED_EXTRA_MARGIN:
+                                continue  # First hit was a fluke; skip
+
                             results.append(Result(
                                 plugin_name=self.name,
                                 base_severity=self.base_severity,
-                                title=f"SQL Injection in parameter '{param_name}'",
-                                description=f"Error-based SQLi detected with payload: {payload}",
-                                evidence=pattern.pattern,
+                                title=f"Time-Based Blind SQL Injection in parameter '{param_name}'",
+                                description=(
+                                    f"Time-based blind SQLi detected with payload: {payload}. "
+                                    f"Response delayed {delay:.1f}s above baseline median {baseline_median:.2f}s "
+                                    f"(confirmed: {confirm_elapsed:.2f}s)."
+                                ),
+                                evidence=(
+                                    f"Response time: {elapsed:.2f}s, baseline median: {baseline_median:.2f}s, "
+                                    f"delay: {delay:.2f}s, confirmation delay: {confirm_delay:.2f}s"
+                                ),
                                 cwe_id="CWE-89",
                                 endpoint=target.url,
                                 param_name=param_name,
                                 curl_command=f"curl {shlex.quote(test_url)}",
-                                rule_id="sqli_error_based",
+                                rule_id="sqli_time_based",
                             ))
                             return results  # Stop on first confirmed finding
 
-            # --- Time-based blind SQLi detection ---
-            # Measure baseline 3 times and use the median for a stable reference
-            baseline_samples: list[float] = []
-            for _ in range(3):
-                try:
-                    t0 = time.monotonic()
-                    await client.get(target.url)
-                    baseline_samples.append(time.monotonic() - t0)
-                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                    pass
-            baseline_median = statistics.median(baseline_samples) if baseline_samples else 0.0
+            # --- POST body fuzzing ---
+            # Try POST injection when no GET params exist or GET scan found nothing
+            if not results:
+                post_fields = ["q", "search", "username", "email", "name", "query", "input"]
+                # Also inject into forms discovered by the crawler
+                form_fields: list[str] = []
+                post_urls: list[str] = [target.url]
+                if context and context.crawl_forms:
+                    for form in context.crawl_forms:
+                        if form.get("method", "get").lower() == "post":
+                            form_action = form.get("action", target.url)
+                            if form_action not in post_urls:
+                                post_urls.append(form_action)
+                            for field in form.get("fields", []):
+                                fname = field.get("name", "")
+                                if fname and fname not in form_fields:
+                                    form_fields.append(fname)
 
-            for param_name, values in params.items():
-                original_value = values[0] if values else ""
-                for payload in TIME_BASED_PAYLOADS:
-                    test_params = {k: v[0] for k, v in params.items()}
-                    test_params[param_name] = original_value + payload
-                    test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+                fields_to_fuzz = form_fields if form_fields else post_fields
 
-                    try:
-                        t_start = time.monotonic()
-                        resp = await client.get(test_url, timeout=15)
-                        elapsed = time.monotonic() - t_start
-                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                        continue
+                for post_url in post_urls[:5]:
+                    for field in fields_to_fuzz[:MAX_PARAMS]:
+                        for payload in PAYLOADS:
+                            data = {field: payload}
+                            try:
+                                resp = await client.post(post_url, data=data, timeout=10)
+                            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                                continue
 
-                    delay = elapsed - baseline_median
-                    if delay > TIME_BASED_EXTRA_MARGIN:
-                        # Confirmation request: only report if second attempt is also slow
-                        try:
-                            t_confirm = time.monotonic()
-                            await client.get(test_url, timeout=15)
-                            confirm_elapsed = time.monotonic() - t_confirm
-                        except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                            continue
+                            if len(resp.text) > 1_000_000:
+                                continue
 
-                        confirm_delay = confirm_elapsed - baseline_median
-                        if confirm_delay <= TIME_BASED_EXTRA_MARGIN:
-                            continue  # First hit was a fluke; skip
-
-                        results.append(Result(
-                            plugin_name=self.name,
-                            base_severity=self.base_severity,
-                            title=f"Time-Based Blind SQL Injection in parameter '{param_name}'",
-                            description=(
-                                f"Time-based blind SQLi detected with payload: {payload}. "
-                                f"Response delayed {delay:.1f}s above baseline median {baseline_median:.2f}s "
-                                f"(confirmed: {confirm_elapsed:.2f}s)."
-                            ),
-                            evidence=(
-                                f"Response time: {elapsed:.2f}s, baseline median: {baseline_median:.2f}s, "
-                                f"delay: {delay:.2f}s, confirmation delay: {confirm_delay:.2f}s"
-                            ),
-                            cwe_id="CWE-89",
-                            endpoint=target.url,
-                            param_name=param_name,
-                            curl_command=f"curl {shlex.quote(test_url)}",
-                            rule_id="sqli_time_based",
-                        ))
-                        return results  # Stop on first confirmed finding
+                            for pattern in SQL_ERROR_PATTERNS:
+                                if pattern in baseline_matched_patterns:
+                                    continue
+                                if pattern.search(resp.text):
+                                    results.append(Result(
+                                        plugin_name=self.name,
+                                        base_severity=self.base_severity,
+                                        title=f"SQL Injection via POST field '{field}'",
+                                        description=f"Error-based SQLi detected with POST payload: {payload}",
+                                        evidence=pattern.pattern,
+                                        cwe_id="CWE-89",
+                                        endpoint=post_url,
+                                        param_name=field,
+                                        rule_id="sqli_error_based",
+                                    ))
+                                    return results
 
         return results

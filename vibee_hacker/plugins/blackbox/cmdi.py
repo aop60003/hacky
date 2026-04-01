@@ -21,6 +21,8 @@ PAYLOADS = [
     f"& echo {MARKER}",        # Windows cmd
 ]
 
+MAX_PARAMS = 10
+
 
 class CmdiPlugin(PluginBase):
     name = "cmdi"
@@ -37,12 +39,6 @@ class CmdiPlugin(PluginBase):
 
         parsed = urlparse(target.url)
         params = parse_qs(parsed.query)
-        if not params:
-            return []
-
-        MAX_PARAMS = 10
-        if len(params) > MAX_PARAMS:
-            params = dict(list(params.items())[:MAX_PARAMS])
 
         results = []
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
@@ -54,34 +50,82 @@ class CmdiPlugin(PluginBase):
             except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                 return []
 
-            for param_name, values in params.items():
-                original = values[0] if values else ""
-                for payload in PAYLOADS:
-                    test_params = {k: v[0] for k, v in params.items()}
-                    test_params[param_name] = original + payload
-                    test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+            # --- GET parameter fuzzing ---
+            if params:
+                capped_params = dict(list(params.items())[:MAX_PARAMS])
+                for param_name, values in capped_params.items():
+                    original = values[0] if values else ""
+                    for payload in PAYLOADS:
+                        test_params = {k: v[0] for k, v in capped_params.items()}
+                        test_params[param_name] = original + payload
+                        test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
 
-                    try:
-                        resp = await client.get(test_url)
-                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                        continue
+                        try:
+                            resp = await client.get(test_url)
+                        except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                            continue
 
-                    if len(resp.text) > 1_000_000:  # 1MB max response
-                        continue
+                        if len(resp.text) > 1_000_000:  # 1MB max response
+                            continue
 
-                    if MARKER in resp.text:
-                        results.append(Result(
-                            plugin_name=self.name,
-                            base_severity=self.base_severity,
-                            title=f"Command Injection in parameter '{param_name}'",
-                            description=f"Output-based CMDi with payload: {payload}",
-                            evidence=MARKER,
-                            cwe_id="CWE-78",
-                            endpoint=target.url,
-                            param_name=param_name,
-                            curl_command=f"curl {shlex.quote(test_url)}",
-                            rule_id="cmdi_output_based",
-                        ))
-                        return results
+                        if MARKER in resp.text:
+                            results.append(Result(
+                                plugin_name=self.name,
+                                base_severity=self.base_severity,
+                                title=f"Command Injection in parameter '{param_name}'",
+                                description=f"Output-based CMDi with payload: {payload}",
+                                evidence=MARKER,
+                                cwe_id="CWE-78",
+                                endpoint=target.url,
+                                param_name=param_name,
+                                curl_command=f"curl {shlex.quote(test_url)}",
+                                rule_id="cmdi_output_based",
+                            ))
+                            return results
+
+            # --- POST body fuzzing ---
+            # Try POST injection when no GET params exist or GET scan found nothing
+            if not results:
+                post_fields = ["q", "search", "username", "email", "name", "query", "input"]
+                form_fields: list[str] = []
+                post_urls: list[str] = [target.url]
+                if context and context.crawl_forms:
+                    for form in context.crawl_forms:
+                        if form.get("method", "get").lower() == "post":
+                            form_action = form.get("action", target.url)
+                            if form_action not in post_urls:
+                                post_urls.append(form_action)
+                            for field in form.get("fields", []):
+                                fname = field.get("name", "")
+                                if fname and fname not in form_fields:
+                                    form_fields.append(fname)
+
+                fields_to_fuzz = form_fields if form_fields else post_fields
+
+                for post_url in post_urls[:5]:
+                    for field in fields_to_fuzz[:MAX_PARAMS]:
+                        for payload in PAYLOADS:
+                            data = {field: payload}
+                            try:
+                                resp = await client.post(post_url, data=data, timeout=10)
+                            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                                continue
+
+                            if len(resp.text) > 1_000_000:
+                                continue
+
+                            if MARKER in resp.text:
+                                results.append(Result(
+                                    plugin_name=self.name,
+                                    base_severity=self.base_severity,
+                                    title=f"Command Injection via POST field '{field}'",
+                                    description=f"Output-based CMDi via POST with payload: {payload}",
+                                    evidence=MARKER,
+                                    cwe_id="CWE-78",
+                                    endpoint=post_url,
+                                    param_name=field,
+                                    rule_id="cmdi_output_based",
+                                ))
+                                return results
 
         return results
