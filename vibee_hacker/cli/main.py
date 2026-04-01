@@ -62,10 +62,14 @@ def cli():
 @click.option("--resume", type=click.Path(exists=True), default=None, help="Resume scan from session file path")
 @click.option("--baseline", type=click.Path(exists=True), default=None, help="Previous report JSON for diff")
 @click.option("--false-positive", "false_positive", type=click.Path(exists=True), default=None, help="JSON file with rule_ids to suppress")
+@click.option("--targets-file", type=click.Path(exists=True), default=None, help="File with one target URL per line")
+@click.option("--cookie", type=str, default=None, help="Cookie header (e.g., 'session=abc123')")
+@click.option("--header", "extra_headers", type=str, multiple=True, help="Extra header (repeatable, e.g., 'Authorization: Bearer token')")
 def scan(
     target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet,
     proxy, safe_mode, concurrency, delay, insecure, profile,
     save_session, resume, baseline, false_positive,
+    targets_file, cookie, extra_headers,
 ):
     """Run a security scan against a target."""
     # Apply profile presets first; explicit flags override them
@@ -84,6 +88,15 @@ def scan(
             effective_safe_mode = preset["safe_mode"]
 
     verify_ssl = not insecure
+
+    # Build auth_headers from --cookie and --header options
+    auth_headers: dict[str, str] = {}
+    if cookie:
+        auth_headers["Cookie"] = cookie
+    for h in extra_headers:
+        if ": " in h:
+            key, val = h.split(": ", 1)
+            auth_headers[key] = val
 
     if mode == "blackbox":
         t = Target(url=target, mode=mode, verify_ssl=verify_ssl, proxy=proxy, delay=delay)
@@ -230,6 +243,63 @@ def scan(
         for r in results:
             if str(r.context_severity).upper() in levels:
                 sys.exit(1)
+
+
+@cli.command()
+@click.option("--file", "-f", required=True, type=click.Path(exists=True), help="File with one target per line")
+@click.option("--mode", "-m", default="blackbox", type=click.Choice(["blackbox", "whitebox"]))
+@click.option("--format", "fmt", default="json", type=click.Choice(["json", "html", "sarif"]))
+@click.option("--output-dir", "-o", default="./reports", help="Output directory for reports")
+@click.option("--quiet", is_flag=True)
+def batch(file, mode, fmt, output_dir, quiet):
+    """Batch scan multiple targets from a file."""
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+
+    with open(file) as f:
+        targets = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+
+    if not quiet:
+        console.print(f"[cyan]Batch scanning {len(targets)} targets...[/cyan]")
+
+    for i, target_str in enumerate(targets, 1):
+        if not quiet:
+            console.print(f"[cyan][{i}/{len(targets)}] Scanning {target_str}...[/cyan]")
+
+        if mode == "blackbox":
+            t = Target(url=target_str, mode=mode)
+        else:
+            t = Target(path=target_str, mode=mode)
+
+        loader = PluginLoader()
+        loader.load_builtin()
+        engine = ScanEngine(timeout_per_plugin=30, safe_mode=True)
+        for p in loader.plugins:
+            engine.register_plugin(p)
+
+        results = asyncio.run(engine.scan(t))
+
+        # Generate report
+        safe_name = (
+            target_str.replace("://", "_").replace("/", "_").replace(":", "_")[:50]
+        )
+        output_path = os.path.join(output_dir, f"{safe_name}.{fmt}")
+
+        if fmt == "html":
+            from vibee_hacker.reports.html_report import HtmlReporter
+            HtmlReporter().generate(results, t, output_path)
+        elif fmt == "sarif":
+            from vibee_hacker.reports.sarif_report import SarifReporter
+            SarifReporter().generate(results, t, output_path)
+        else:
+            from vibee_hacker.reports.json_report import JsonReporter
+            JsonReporter().generate(results, t, output_path)
+
+        if not quiet:
+            console.print(f"  [green]{len(results)} findings -> {output_path}[/green]")
+
+    if not quiet:
+        console.print(f"[green]Batch complete: {len(targets)} targets scanned.[/green]")
 
 
 @cli.command()
