@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,6 +56,8 @@ class SessionManager:
 
     def save(self, session: ScanSession, path: str | None = None) -> str:
         """Persist a session to disk and return the file path."""
+        if not re.match(r'^[a-zA-Z0-9_-]+$', session.session_id):
+            raise ValueError(f"Invalid session_id: {session.session_id!r}. Only alphanumeric, dash, underscore allowed.")
         if not path:
             self.session_dir.mkdir(parents=True, exist_ok=True)
             path = str(self.session_dir / f"{session.session_id}.json")

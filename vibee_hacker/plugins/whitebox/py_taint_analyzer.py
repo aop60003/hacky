@@ -226,9 +226,13 @@ class PyTaintAnalyzerPlugin(PluginBase):
     def _find_tainted_arg(
         self, node: ast.Call, state: TaintState
     ) -> tuple[str, list[str]] | None:
-        """Return (arg_name, chain) if any positional argument is tainted."""
+        """Return (arg_name, chain) if any positional or keyword argument is tainted."""
         for arg in node.args:
             arg_name = self._get_arg_name(arg)
+            if arg_name and state.is_tainted(arg_name):
+                return arg_name, state.get_chain(arg_name)
+        for kw in node.keywords:
+            arg_name = self._get_arg_name(kw.value)
             if arg_name and state.is_tainted(arg_name):
                 return arg_name, state.get_chain(arg_name)
         return None

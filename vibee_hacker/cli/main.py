@@ -71,7 +71,7 @@ def scan(
     effective_timeout = timeout
     effective_safe_mode = safe_mode
 
-    if profile and profile != "default":
+    if profile:
         preset = PROFILES[profile]
         ctx = click.get_current_context()
         if ctx.get_parameter_source("timeout") == click.core.ParameterSource.DEFAULT:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse, parse_qs
@@ -89,11 +90,11 @@ class Crawler:
         result = CrawlResult()
         visited: set[str] = set()
         base_domain = urlparse(start_url).netloc
-        queue: list[tuple[str, int]] = [(start_url, 0)]
+        queue: deque[tuple[str, int]] = deque([(start_url, 0)])
 
         async with httpx.AsyncClient(verify=self.verify_ssl, timeout=self.timeout) as client:
             while queue and len(visited) < self.max_pages:
-                url, depth = queue.pop(0)
+                url, depth = queue.popleft()
 
                 if url in visited or depth > self.max_depth:
                     continue
