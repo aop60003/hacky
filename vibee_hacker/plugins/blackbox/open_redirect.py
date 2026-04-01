@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import shlex
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
 
 import httpx
 
@@ -13,6 +13,9 @@ from vibee_hacker.core.plugin_base import PluginBase
 
 REDIRECT_PARAMS = ["url", "redirect", "next", "return", "goto", "dest", "redir"]
 EVIL_URL = "https://evil.com"
+
+# Common redirect-capable paths to probe even if not linked from the homepage
+REDIRECT_PATHS = ["/redirect", "/redir", "/goto", "/out", "/external", "/link", "/go"]
 
 
 class OpenRedirectPlugin(PluginBase):
@@ -36,6 +39,10 @@ class OpenRedirectPlugin(PluginBase):
                     urls_to_test.append(crawled_url)
 
         results: list[Result] = []
+
+        # Base URL for probing common redirect paths
+        parsed_base = urlparse(target.url)
+        base_url = f"{parsed_base.scheme}://{parsed_base.netloc}"
 
         async with httpx.AsyncClient(
             verify=target.verify_ssl,
@@ -76,6 +83,35 @@ class OpenRedirectPlugin(PluginBase):
                                 endpoint=test_url,
                                 param_name=param,
                                 curl_command=f"curl -v {shlex.quote(test_url)}",
+                                rule_id="open_redirect",
+                            ))
+                            return results
+
+            # Probe common redirect paths that may not be linked from the homepage
+            for path in REDIRECT_PATHS:
+                for param in REDIRECT_PARAMS:
+                    probe_url = f"{base_url}{path}?{param}={EVIL_URL}"
+                    try:
+                        resp = await client.get(probe_url)
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                        continue
+
+                    if resp.status_code in (301, 302, 303, 307, 308):
+                        location = resp.headers.get("location", "")
+                        if "evil.com" in location:
+                            results.append(Result(
+                                plugin_name=self.name,
+                                base_severity=self.base_severity,
+                                title=f"Open redirect via parameter '{param}' at {path}",
+                                description=(
+                                    f"Parameter '{param}' at path '{path}' causes an unvalidated "
+                                    f"redirect to {location}."
+                                ),
+                                evidence=f"Status: {resp.status_code} | Location: {location}",
+                                cwe_id="CWE-601",
+                                endpoint=probe_url,
+                                param_name=param,
+                                curl_command=f"curl -v {shlex.quote(probe_url)}",
                                 rule_id="open_redirect",
                             ))
                             return results

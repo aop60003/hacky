@@ -64,81 +64,96 @@ class IdorCheckPlugin(PluginBase):
         if not target.url:
             return []
 
-        # Determine where the numeric ID lives (path or query param)
+        # Collect all candidate URLs to check: start URL + crawled URLs with numeric IDs
+        candidate_source_urls: list[str] = []
+
+        # Always include target URL if it has a numeric ID
         has_path_id = _has_numeric_id_in_path(target.url)
         numeric_params = _numeric_params(target.url)
+        if has_path_id or numeric_params:
+            candidate_source_urls.append(target.url)
 
-        if not has_path_id and not numeric_params:
+        # Also include crawled URLs that have numeric path IDs (not already covered)
+        if context:
+            for crawled_url in (context.crawl_urls or [])[:15]:
+                if crawled_url != target.url and _has_numeric_id_in_path(crawled_url):
+                    candidate_source_urls.append(crawled_url)
+
+        if not candidate_source_urls:
             return []
 
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            # Baseline: fetch original resource
-            try:
-                baseline_resp = await client.get(target.url)
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
+            for source_url in candidate_source_urls:
+                src_has_path_id = _has_numeric_id_in_path(source_url)
+                src_numeric_params = _numeric_params(source_url)
 
-            baseline_text = baseline_resp.text
-            baseline_status = baseline_resp.status_code
+                # Baseline: fetch original resource
+                try:
+                    baseline_resp = await client.get(source_url)
+                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                    continue
 
-            # Build list of (modified_url, label) candidates to probe
-            candidates: list[tuple[str, str]] = []
+                baseline_text = baseline_resp.text
+                baseline_status = baseline_resp.status_code
 
-            if has_path_id:
-                parsed_path = PATH_ID_RE.match(urlparse(target.url).path)
-                if parsed_path:
-                    orig_id = int(parsed_path.group(2))
+                # Build list of (modified_url, label) candidates to probe
+                candidates: list[tuple[str, str]] = []
+
+                if src_has_path_id:
+                    parsed_path = PATH_ID_RE.match(urlparse(source_url).path)
+                    if parsed_path:
+                        orig_id = int(parsed_path.group(2))
+                        for delta in (1, -1):
+                            new_id = orig_id + delta
+                            if new_id < 0:
+                                continue
+                            new_url = _substitute_path_id(source_url, new_id)
+                            if new_url:
+                                candidates.append((new_url, f"path id {orig_id}+({delta:+d})={new_id}"))
+
+                for param, orig_id in src_numeric_params.items():
                     for delta in (1, -1):
                         new_id = orig_id + delta
                         if new_id < 0:
                             continue
-                        new_url = _substitute_path_id(target.url, new_id)
-                        if new_url:
-                            candidates.append((new_url, f"path id {orig_id}+({delta:+d})={new_id}"))
+                        new_url = _substitute_param_id(source_url, param, new_id)
+                        candidates.append((new_url, f"param {param!r}: {orig_id}+({delta:+d})={new_id}"))
 
-            for param, orig_id in numeric_params.items():
-                for delta in (1, -1):
-                    new_id = orig_id + delta
-                    if new_id < 0:
+                for probe_url, label in candidates:
+                    try:
+                        resp = await client.get(probe_url)
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                         continue
-                    new_url = _substitute_param_id(target.url, param, new_id)
-                    candidates.append((new_url, f"param {param!r}: {orig_id}+({delta:+d})={new_id}"))
 
-            for probe_url, label in candidates:
-                try:
-                    resp = await client.get(probe_url)
-                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                    continue
+                    if len(resp.text) > 1_000_000:
+                        continue
 
-                if len(resp.text) > 1_000_000:
-                    continue
-
-                # Detection: 200 response with non-empty body different from baseline
-                if (
-                    resp.status_code == 200
-                    and resp.text.strip()
-                    and resp.text != baseline_text
-                    and baseline_status == 200
-                ):
-                    curl_cmd = f"curl {shlex.quote(probe_url)}"
-                    return [Result(
-                        plugin_name=self.name,
-                        base_severity=self.base_severity,
-                        title="BOLA/IDOR — Insecure Direct Object Reference",
-                        description=(
-                            f"Modifying the numeric ID in the URL ({label}) returned a "
-                            f"different valid 200 response. This indicates the server does "
-                            f"not properly enforce access controls on object references. "
-                            f"(Manual verification required - may be a public endpoint)"
-                        ),
-                        evidence=(
-                            f"Original URL: {target.url} → status {baseline_status}\n"
-                            f"Modified URL: {probe_url} → status 200, different body"
-                        ),
-                        cwe_id="CWE-639",
-                        endpoint=target.url,
-                        curl_command=curl_cmd,
-                        rule_id="idor_id_enumeration",
-                    )]
+                    # Detection: 200 response with non-empty body different from baseline
+                    if (
+                        resp.status_code == 200
+                        and resp.text.strip()
+                        and resp.text != baseline_text
+                        and baseline_status == 200
+                    ):
+                        curl_cmd = f"curl {shlex.quote(probe_url)}"
+                        return [Result(
+                            plugin_name=self.name,
+                            base_severity=self.base_severity,
+                            title="BOLA/IDOR — Insecure Direct Object Reference",
+                            description=(
+                                f"Modifying the numeric ID in the URL ({label}) returned a "
+                                f"different valid 200 response. This indicates the server does "
+                                f"not properly enforce access controls on object references. "
+                                f"(Manual verification required - may be a public endpoint)"
+                            ),
+                            evidence=(
+                                f"Original URL: {source_url} → status {baseline_status}\n"
+                                f"Modified URL: {probe_url} → status 200, different body"
+                            ),
+                            cwe_id="CWE-639",
+                            endpoint=source_url,
+                            curl_command=curl_cmd,
+                            rule_id="idor_id_enumeration",
+                        )]
 
         return []

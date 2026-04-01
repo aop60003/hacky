@@ -27,12 +27,16 @@ class CorsCheckPlugin(PluginBase):
         if not target.url:
             return []
 
-        # Build list of URLs to test: start URL + crawled URLs (no param requirement for CORS)
+        # Build list of URLs to test: start URL + crawled URLs + crawled API endpoints
         urls_to_test: list[str] = [target.url]
         if context:
             for crawled_url in (context.crawl_urls or [])[:10]:
-                if crawled_url != target.url:
+                if crawled_url not in urls_to_test:
                     urls_to_test.append(crawled_url)
+            # crawl_parameters keys are URLs discovered via JS fetch/axios patterns
+            for api_url in list((context.crawl_parameters or {}).keys())[:10]:
+                if api_url not in urls_to_test:
+                    urls_to_test.append(api_url)
 
         results = []
         seen_rule_ids: set[str] = set()
