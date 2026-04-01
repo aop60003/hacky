@@ -16,25 +16,20 @@ DEFAULT_CREDS = [
     {"url_pattern": "/grafana/", "username": "admin", "password": "admin"},
 ]
 
-# Response body fragments that indicate a failed login
-_FAILURE_MARKERS = (
-    "invalid",
-    "incorrect",
-    "wrong password",
-    "authentication failed",
-    "login failed",
-    "bad credentials",
-    "unauthorized",
-    "access denied",
-)
+SUCCESS_MARKERS = [
+    "dashboard",
+    "welcome",
+    "logout",
+    "admin panel",
+    "control panel",
+    "successfully",
+]
 
 
 def _login_succeeded(resp: httpx.Response) -> bool:
-    """Return True if the response looks like a successful login."""
-    body_lower = resp.text.lower()
-    if any(marker in body_lower for marker in _FAILURE_MARKERS):
-        return False
-    return True
+    """Return True if the response contains positive success markers."""
+    text = resp.text.lower()
+    return any(marker in text for marker in SUCCESS_MARKERS)
 
 
 class DefaultCredsPlugin(PluginBase):

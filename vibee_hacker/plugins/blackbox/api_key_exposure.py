@@ -46,12 +46,22 @@ MAX_JS_FILES = 10
 
 
 def _scan_text(text: str) -> list[tuple[str, str]]:
-    """Return list of (key_type, matched_value) for all pattern hits."""
+    """Return list of (key_type, matched_value) for all pattern hits.
+
+    Uses group(1) as the value for patterns with a capture group, but
+    group(0) (the full match) as the deduplication key so that the same
+    raw token is never emitted twice regardless of which group is used.
+    """
     hits: list[tuple[str, str]] = []
+    seen_full: set[str] = set()
     for compiled, key_type in _COMPILED_PATTERNS:
         for m in compiled.finditer(text):
-            # For group-based patterns use group(1), else full match
-            value = m.group(1) if m.lastindex else m.group(0)
+            full_match = m.group(0)
+            if full_match in seen_full:
+                continue
+            seen_full.add(full_match)
+            # Expose the captured value (group 1) when available, else full match
+            value = m.group(1) if m.lastindex else full_match
             hits.append((key_type, value))
     return hits
 
@@ -84,6 +94,7 @@ class ApiKeyExposurePlugin(PluginBase):
             return []
 
         results: list[Result] = []
+        seen_keys: set[tuple[str, str]] = set()
 
         async with httpx.AsyncClient(
             verify=target.verify_ssl,
@@ -100,6 +111,10 @@ class ApiKeyExposurePlugin(PluginBase):
 
             # Scan main page
             for key_type, value in _scan_text(main_body):
+                dedup_key = (key_type, value)
+                if dedup_key in seen_keys:
+                    continue
+                seen_keys.add(dedup_key)
                 results.append(self._make_result(
                     key_type=key_type,
                     value=value,
@@ -127,6 +142,10 @@ class ApiKeyExposurePlugin(PluginBase):
 
                 js_body = js_resp.text
                 for key_type, value in _scan_text(js_body):
+                    dedup_key = (key_type, value)
+                    if dedup_key in seen_keys:
+                        continue
+                    seen_keys.add(dedup_key)
                     results.append(self._make_result(
                         key_type=key_type,
                         value=value,
@@ -143,7 +162,7 @@ class ApiKeyExposurePlugin(PluginBase):
         source_url: str,
         endpoint: str,
     ) -> Result:
-        masked = value[:6] + "..." + value[-4:] if len(value) > 12 else value[:4] + "..."
+        masked = value[:4] + "***" + value[-2:] if len(value) > 8 else value[:4] + "***"
         return Result(
             plugin_name="api_key_exposure",
             base_severity=Severity.CRITICAL,

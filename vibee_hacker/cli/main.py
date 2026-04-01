@@ -136,14 +136,14 @@ def scan(
         prev_keys: set[tuple[str, str, str]] = set()
         for finding in prev_data.get("findings", []):
             key = (
-                finding.get("rule_id", ""),
-                finding.get("endpoint", ""),
-                finding.get("param_name", "") or "",
+                finding.get("rule_id") or "",
+                finding.get("endpoint") or "",
+                finding.get("param_name") or "",
             )
             prev_keys.add(key)
         new_results = [
             r for r in results
-            if (r.rule_id, r.endpoint, r.param_name or "") not in prev_keys
+            if (r.rule_id or "", r.endpoint or "", r.param_name or "") not in prev_keys
         ]
         if not quiet:
             console.print(

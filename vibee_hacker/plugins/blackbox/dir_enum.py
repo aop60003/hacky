@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import httpx
 
 from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
@@ -121,6 +122,9 @@ class DirEnumPlugin(PluginBase):
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                     # Treat all transport errors as not found
                     continue
+
+                if target.delay > 0:
+                    await asyncio.sleep(target.delay / 1000)
 
                 if resp.status_code != 200:
                     continue
