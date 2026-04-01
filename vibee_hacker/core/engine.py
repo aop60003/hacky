@@ -91,6 +91,29 @@ class ScanEngine:
             target_ctx.waf_bypass_payloads = source_ctx.waf_bypass_payloads
         if source_ctx.discovered_api_schema and not target_ctx.discovered_api_schema:
             target_ctx.discovered_api_schema = source_ctx.discovered_api_schema
+        # Merge crawler results
+        existing_crawl_urls = set(target_ctx.crawl_urls)
+        for url in source_ctx.crawl_urls:
+            if url not in existing_crawl_urls:
+                target_ctx.crawl_urls.append(url)
+                existing_crawl_urls.add(url)
+        existing_crawl_forms = {
+            (f.get("action", ""), f.get("method", "")) for f in target_ctx.crawl_forms
+        }
+        for form in source_ctx.crawl_forms:
+            key = (form.get("action", ""), form.get("method", ""))
+            if key not in existing_crawl_forms:
+                target_ctx.crawl_forms.append(form)
+                existing_crawl_forms.add(key)
+        for url, param_list in source_ctx.crawl_parameters.items():
+            if url not in target_ctx.crawl_parameters:
+                target_ctx.crawl_parameters[url] = param_list
+            else:
+                existing_params = set(target_ctx.crawl_parameters[url])
+                for p in param_list:
+                    if p not in existing_params:
+                        target_ctx.crawl_parameters[url].append(p)
+                        existing_params.add(p)
 
     async def _run_plugin_safe(
         self, plugin: PluginBase, target: Target, context: InterPhaseContext | None = None

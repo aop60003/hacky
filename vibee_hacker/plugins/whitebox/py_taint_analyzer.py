@@ -40,9 +40,11 @@ SINKS: dict[str, tuple[str, Severity, str]] = {
 }
 
 # Sanitizers: functions that clean tainted data
+# NOTE: "str" and "bool" are intentionally excluded — they do NOT prevent SQL injection.
+# Only "int" and "float" are safe as they convert to numeric types with no injection risk.
 SANITIZERS = {
     "html.escape", "bleach.clean", "markupsafe.escape", "escape",
-    "shlex.quote", "int", "float", "str", "bool",
+    "shlex.quote", "int", "float",
     "quote", "urlencode",
 }
 
@@ -104,6 +106,17 @@ class PyTaintAnalyzerPlugin(PluginBase):
 
         return results
 
+    def _iter_stmts(self, body: list) -> "Generator[ast.AST, None, None]":
+        """Iterate AST statements in execution order."""
+        for stmt in body:
+            yield stmt
+            # Recurse into compound statements
+            for child_body in ('body', 'orelse', 'finalbody', 'handlers'):
+                if hasattr(stmt, child_body):
+                    child = getattr(stmt, child_body)
+                    if isinstance(child, list):
+                        yield from self._iter_stmts(child)
+
     def _analyze_function(
         self,
         func: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -113,8 +126,8 @@ class PyTaintAnalyzerPlugin(PluginBase):
         results: list[Result] = []
         state = TaintState()
 
-        # Walk statements in order, not arbitrary ast.walk (which is unordered)
-        for node in ast.walk(func):
+        # Walk statements in execution order (not unordered ast.walk)
+        for node in self._iter_stmts(func.body):
             # Step 1: Assignments — detect sources and propagate taint
             if isinstance(node, ast.Assign):
                 self._process_assign(node, filepath, state)
@@ -128,17 +141,29 @@ class PyTaintAnalyzerPlugin(PluginBase):
                         if var_name:
                             state.sanitize(var_name)
 
-            # Step 3: Detect sinks with tainted arguments
+            # Step 3: Detect sinks with tainted arguments.
+            # _iter_stmts yields statement nodes. Calls can appear as:
+            #   ast.Expr(value=ast.Call(...))   — standalone call statement
+            #   ast.Assign(value=ast.Call(...)) — assigned call, e.g. result = eval(x)
+            #   ast.Call (rare: already a node) — direct node (defensive)
+            call_node: ast.AST | None = None
             if isinstance(node, ast.Call):
-                func_name = self._node_to_str(node.func)
+                call_node = node
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                call_node = node.value
+            elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                call_node = node.value
+
+            if call_node is not None and isinstance(call_node, ast.Call):
+                func_name = self._node_to_str(call_node.func)
                 sink_info = SINKS.get(func_name)
                 if sink_info:
                     cwe, severity, desc = sink_info
-                    tainted_arg = self._find_tainted_arg(node, state)
+                    tainted_arg = self._find_tainted_arg(call_node, state)
                     if tainted_arg is not None:
                         arg_name, chain = tainted_arg
                         full_chain = chain + [
-                            f"{filepath}:{node.lineno}: {func_name}({arg_name})"
+                            f"{filepath}:{call_node.lineno}: {func_name}({arg_name})"
                         ]
                         results.append(Result(
                             plugin_name=self.name,

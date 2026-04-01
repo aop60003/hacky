@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -77,6 +78,14 @@ class SessionManager:
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+
+        # Set restrictive permissions: owner read/write only (0o600)
+        # Wrapped for Windows compatibility (Windows does not fully support Unix chmod)
+        try:
+            os.chmod(path, 0o600)
+        except (OSError, NotImplementedError):
+            pass  # Windows: silently skip; file ACLs are managed by the OS
+
         return path
 
     def load(self, path: str) -> ScanSession:

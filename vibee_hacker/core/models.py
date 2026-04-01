@@ -104,3 +104,7 @@ class InterPhaseContext:
     ssrf_endpoints: list[str] = field(default_factory=list)
     dangling_cnames: list[str] = field(default_factory=list)
     discovered_api_schema: dict | None = None
+    # Crawler results shared with later phases
+    crawl_urls: list[str] = field(default_factory=list)
+    crawl_forms: list[dict] = field(default_factory=list)
+    crawl_parameters: dict[str, list[str]] = field(default_factory=dict)

@@ -29,14 +29,12 @@ class TestSqli:
         assert results[0].base_severity == Severity.CRITICAL
 
     @pytest.mark.asyncio
+    @pytest.mark.httpx_mock(assert_all_requests_were_expected=False)
     async def test_no_sqli(self, plugin, target, httpx_mock):
         # Return normal page for any payload URL (no SQL errors)
-        httpx_mock.add_response(text="<html>Normal page</html>")
-        httpx_mock.add_response(text="<html>Normal page</html>")
-        httpx_mock.add_response(text="<html>Normal page</html>")
-        httpx_mock.add_response(text="<html>Normal page</html>")
-        httpx_mock.add_response(text="<html>Normal page</html>")
-        httpx_mock.add_response(text="<html>Normal page</html>")
+        # 1 baseline + 5 error-based payloads + 2 time-based payloads = 8 max
+        for _ in range(8):
+            httpx_mock.add_response(text="<html>Normal page</html>")
         results = await plugin.run(target)
         assert len(results) == 0
 

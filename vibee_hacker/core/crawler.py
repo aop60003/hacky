@@ -80,17 +80,26 @@ class Crawler:
         max_pages: int = 100,
         timeout: int = 10,
         verify_ssl: bool = True,
+        auth_headers: dict[str, str] | None = None,
     ):
         self.max_depth = max_depth
         self.max_pages = max_pages
         self.timeout = timeout
         self.verify_ssl = verify_ssl
+        self.auth_headers = auth_headers
 
-    async def crawl(self, start_url: str) -> CrawlResult:
+    async def crawl(self, start_url: str, auth_headers: dict[str, str] | None = None) -> CrawlResult:
         result = CrawlResult()
         visited: set[str] = set()
         base_domain = urlparse(start_url).netloc
         queue: deque[tuple[str, int]] = deque([(start_url, 0)])
+
+        # Merge instance-level auth_headers with any passed per-call headers
+        effective_headers: dict[str, str] = {}
+        if self.auth_headers:
+            effective_headers.update(self.auth_headers)
+        if auth_headers:
+            effective_headers.update(auth_headers)
 
         async with httpx.AsyncClient(verify=self.verify_ssl, timeout=self.timeout) as client:
             while queue and len(visited) < self.max_pages:
@@ -101,7 +110,8 @@ class Crawler:
                 visited.add(url)
 
                 try:
-                    resp = await client.get(url)
+                    headers = effective_headers or {}
+                    resp = await client.get(url, headers=headers)
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                     continue
 

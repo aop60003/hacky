@@ -1,10 +1,11 @@
 # vibee_hacker/plugins/blackbox/sqli.py
-"""SQL Injection detection plugin (error-based)."""
+"""SQL Injection detection plugin (error-based and time-based blind)."""
 
 from __future__ import annotations
 
 import re
 import shlex
+import time
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import httpx
@@ -27,10 +28,16 @@ SQL_ERROR_PATTERNS = [
 
 PAYLOADS = ["'", '"', "' OR '1'='1", "1' AND '1'='2", "1; SELECT 1--"]
 
+TIME_BASED_PAYLOADS = [
+    "' OR SLEEP(3)--",
+    "'; WAITFOR DELAY '0:0:3'--",
+]
+TIME_BASED_THRESHOLD = 3.0  # seconds; flag if response takes >3s longer than baseline
+
 
 class SqliPlugin(PluginBase):
     name = "sqli"
-    description = "SQL Injection detection (error-based)"
+    description = "SQL Injection detection (error-based and time-based blind)"
     category = "blackbox"
     phase = 3
     base_severity = Severity.CRITICAL
@@ -93,5 +100,41 @@ class SqliPlugin(PluginBase):
                                 rule_id="sqli_error_based",
                             ))
                             return results  # Stop on first confirmed finding
+
+            # --- Time-based blind SQLi detection ---
+            baseline_time = baseline_resp.elapsed.total_seconds() if hasattr(baseline_resp, 'elapsed') and baseline_resp.elapsed else 0.0
+
+            for param_name, values in params.items():
+                original_value = values[0] if values else ""
+                for payload in TIME_BASED_PAYLOADS:
+                    test_params = {k: v[0] for k, v in params.items()}
+                    test_params[param_name] = original_value + payload
+                    test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+
+                    try:
+                        t_start = time.monotonic()
+                        resp = await client.get(test_url, timeout=15)
+                        elapsed = time.monotonic() - t_start
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                        continue
+
+                    delay = elapsed - baseline_time
+                    if delay > TIME_BASED_THRESHOLD:
+                        results.append(Result(
+                            plugin_name=self.name,
+                            base_severity=self.base_severity,
+                            title=f"Time-Based Blind SQL Injection in parameter '{param_name}'",
+                            description=(
+                                f"Time-based blind SQLi detected with payload: {payload}. "
+                                f"Response delayed {delay:.1f}s (threshold: {TIME_BASED_THRESHOLD}s)."
+                            ),
+                            evidence=f"Response time: {elapsed:.2f}s, baseline: {baseline_time:.2f}s, delay: {delay:.2f}s",
+                            cwe_id="CWE-89",
+                            endpoint=target.url,
+                            param_name=param_name,
+                            curl_command=f"curl {shlex.quote(test_url)}",
+                            rule_id="sqli_time_based",
+                        ))
+                        return results  # Stop on first confirmed finding
 
         return results
