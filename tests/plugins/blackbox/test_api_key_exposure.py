@@ -21,7 +21,7 @@ class TestApiKeyExposure:
         httpx_mock.add_response(
             url="https://example.com",
             status_code=200,
-            text='<html><body>stripe_key = "sk_test_FAKE_KEY_FOR_TESTING_00000"</body></html>',
+            text='<html><body>api_key = "sk_test_FAKE_KEY_FOR_UNIT_TESTING_01234567890abcdef"</body></html>',
             headers={"content-type": "text/html"},
         )
         results = await plugin.run(target)

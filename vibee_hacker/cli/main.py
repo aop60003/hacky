@@ -60,10 +60,12 @@ def cli():
 )
 @click.option("--save-session", type=str, default=None, help="Save scan session with given ID")
 @click.option("--resume", type=click.Path(exists=True), default=None, help="Resume scan from session file path")
+@click.option("--baseline", type=click.Path(exists=True), default=None, help="Previous report JSON for diff")
+@click.option("--false-positive", "false_positive", type=click.Path(exists=True), default=None, help="JSON file with rule_ids to suppress")
 def scan(
     target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet,
     proxy, safe_mode, concurrency, delay, insecure, profile,
-    save_session, resume,
+    save_session, resume, baseline, false_positive,
 ):
     """Run a security scan against a target."""
     # Apply profile presets first; explicit flags override them
@@ -125,6 +127,38 @@ def scan(
             raise SystemExit(1)
 
     results = asyncio.run(engine.scan(t, phases=phases, plugins=plugin_names))
+
+    # P2-4: Baseline diff — filter out findings already in a previous report
+    if baseline:
+        import json
+        with open(baseline) as f:
+            prev_data = json.load(f)
+        prev_keys: set[tuple[str, str, str]] = set()
+        for finding in prev_data.get("findings", []):
+            key = (
+                finding.get("rule_id", ""),
+                finding.get("endpoint", ""),
+                finding.get("param_name", "") or "",
+            )
+            prev_keys.add(key)
+        new_results = [
+            r for r in results
+            if (r.rule_id, r.endpoint, r.param_name or "") not in prev_keys
+        ]
+        if not quiet:
+            console.print(
+                f"[cyan]Baseline: {len(results) - len(new_results)} existing filtered, "
+                f"{len(new_results)} new[/cyan]"
+            )
+        results = new_results
+
+    # P2-5: False-positive suppression — filter out rule_ids listed in suppress file
+    if false_positive:
+        import json
+        with open(false_positive) as f:
+            fp_data = json.load(f)
+        suppress_rules: set[str] = set(fp_data.get("suppress", []))
+        results = [r for r in results if r.rule_id not in suppress_rules]
 
     # Merge resumed results with new results
     if active_session is not None:
