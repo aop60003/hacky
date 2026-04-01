@@ -154,6 +154,8 @@ class IdorCheckPlugin(PluginBase):
                             endpoint=source_url,
                             curl_command=curl_cmd,
                             rule_id="idor_id_enumeration",
+                            confidence="low",
+                            recommendation="Verify with authenticated session. Implement server-side access control. Verify user owns the requested resource.",
                         )]
 
         return []

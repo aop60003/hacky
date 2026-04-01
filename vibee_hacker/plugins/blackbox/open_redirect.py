@@ -84,6 +84,7 @@ class OpenRedirectPlugin(PluginBase):
                                 param_name=param,
                                 curl_command=f"curl -v {shlex.quote(test_url)}",
                                 rule_id="open_redirect",
+                                recommendation="Restrict redirect destinations to an allowlist. Block external URLs.",
                             ))
                             return results
 
@@ -113,6 +114,7 @@ class OpenRedirectPlugin(PluginBase):
                                 param_name=param,
                                 curl_command=f"curl -v {shlex.quote(probe_url)}",
                                 rule_id="open_redirect",
+                                recommendation="Restrict redirect destinations to an allowlist. Block external URLs.",
                             ))
                             return results
 

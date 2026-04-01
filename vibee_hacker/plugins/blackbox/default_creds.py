@@ -34,10 +34,25 @@ SUCCESS_MARKERS = [
     "successfully",
 ]
 
+FAILURE_MARKERS = [
+    "invalid",
+    "incorrect",
+    "failed",
+    "error",
+    "wrong password",
+    "bad credentials",
+    "denied",
+    "unauthorized",
+]
+
 
 def _login_succeeded(resp: httpx.Response) -> bool:
-    """Return True if the response contains positive success markers."""
+    """Return True if the response contains positive success markers and no failure markers."""
     text = resp.text.lower()
+    # First check failure markers
+    if any(marker in text for marker in FAILURE_MARKERS):
+        return False
+    # Then require success markers
     return any(marker in text for marker in SUCCESS_MARKERS)
 
 
