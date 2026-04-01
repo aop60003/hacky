@@ -5,8 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vibee-hacker"
 version = "1.3.0"
-description = "Security vulnerability scanner with plugin architecture"
+description = "Security vulnerability scanner with 132 plugins — blackbox + whitebox + IaC"
 requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "VIBEE-Hacker Contributors"}]
+keywords = ["security", "scanner", "vulnerability", "pentest", "sast", "dast"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "click>=8.1",
     "httpx>=0.27",
@@ -15,6 +31,11 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
 ]
+
+[project.urls]
+Homepage = "https://github.com/aop60003/hacky"
+Repository = "https://github.com/aop60003/hacky"
+Issues = "https://github.com/aop60003/hacky/issues"
 
 [project.optional-dependencies]
 dev = [
