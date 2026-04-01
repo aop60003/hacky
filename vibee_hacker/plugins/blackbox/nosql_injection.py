@@ -35,67 +35,74 @@ class NoSqlInjectionPlugin(PluginBase):
         if not target.url:
             return []
 
-        parsed = urlparse(target.url)
-        params = parse_qs(parsed.query)
-        if not params:
-            return []
-
-        if len(params) > MAX_PARAMS:
-            params = dict(list(params.items())[:MAX_PARAMS])
+        # Build list of URLs to test: start URL + crawled URLs that have query params
+        urls_to_test: list[str] = [target.url]
+        if context:
+            for crawled_url in (context.crawl_urls or [])[:20]:
+                if crawled_url != target.url and "?" in crawled_url:
+                    urls_to_test.append(crawled_url)
 
         headers = {"Content-Type": "application/json"}
 
-        # Build the original (non-injected) body from URL params
-        original_body: dict = {k: v[0] for k, v in params.items()}
-
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            # Baseline: POST with original param values as JSON body
-            try:
-                baseline_resp = await client.post(target.url, json=original_body)
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
+            for test_target_url in urls_to_test:
+                parsed = urlparse(test_target_url)
+                params = parse_qs(parsed.query)
+                if not params:
+                    continue
 
-            baseline_text = baseline_resp.text
+                capped_params = dict(list(params.items())[:MAX_PARAMS])
 
-            for param_name, values in params.items():
-                for payload in OPERATOR_PAYLOADS:
-                    # Build JSON body replacing target param with operator object
-                    body: dict = {k: v[0] for k, v in params.items()}
-                    body[param_name] = payload
+                # Build the original (non-injected) body from URL params
+                original_body: dict = {k: v[0] for k, v in capped_params.items()}
 
-                    try:
-                        resp = await client.post(
-                            target.url,
-                            content=json.dumps(body).encode(),
-                            headers=headers,
-                        )
-                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                        continue
+                # Baseline: POST with original param values as JSON body
+                try:
+                    baseline_resp = await client.post(test_target_url, json=original_body)
+                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                    continue
 
-                    if len(resp.text) > 1_000_000:
-                        continue
+                baseline_text = baseline_resp.text
 
-                    if resp.status_code == 200 and resp.text != baseline_text:
-                        curl_cmd = (
-                            f"curl -X POST {shlex.quote(target.url)} "
-                            f"-H 'Content-Type: application/json' "
-                            f"-d {shlex.quote(json.dumps(body))}"
-                        )
-                        return [Result(
-                            plugin_name=self.name,
-                            base_severity=self.base_severity,
-                            title=f"NoSQL Injection in parameter '{param_name}'",
-                            description=(
-                                f"MongoDB operator injection detected: payload {json.dumps(payload)!r} "
-                                f"returned a different response than the baseline, indicating "
-                                f"potential authentication bypass."
-                            ),
-                            evidence=f"payload={json.dumps(payload)} → response differs from baseline",
-                            cwe_id="CWE-943",
-                            endpoint=target.url,
-                            param_name=param_name,
-                            curl_command=curl_cmd,
-                            rule_id="nosql_operator_injection",
-                        )]
+                for param_name, values in capped_params.items():
+                    for payload in OPERATOR_PAYLOADS:
+                        # Build JSON body replacing target param with operator object
+                        body: dict = {k: v[0] for k, v in capped_params.items()}
+                        body[param_name] = payload
+
+                        try:
+                            resp = await client.post(
+                                test_target_url,
+                                content=json.dumps(body).encode(),
+                                headers=headers,
+                            )
+                        except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                            continue
+
+                        if len(resp.text) > 1_000_000:
+                            continue
+
+                        if resp.status_code == 200 and resp.text != baseline_text:
+                            curl_cmd = (
+                                f"curl -X POST {shlex.quote(test_target_url)} "
+                                f"-H 'Content-Type: application/json' "
+                                f"-d {shlex.quote(json.dumps(body))}"
+                            )
+                            return [Result(
+                                plugin_name=self.name,
+                                base_severity=self.base_severity,
+                                title=f"NoSQL Injection in parameter '{param_name}'",
+                                description=(
+                                    f"MongoDB operator injection detected: payload {json.dumps(payload)!r} "
+                                    f"returned a different response than the baseline, indicating "
+                                    f"potential authentication bypass."
+                                ),
+                                evidence=f"payload={json.dumps(payload)} → response differs from baseline",
+                                cwe_id="CWE-943",
+                                endpoint=test_target_url,
+                                param_name=param_name,
+                                curl_command=curl_cmd,
+                                rule_id="nosql_operator_injection",
+                            )]
 
         return []

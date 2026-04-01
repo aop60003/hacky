@@ -37,22 +37,32 @@ class CmdiPlugin(PluginBase):
         if not target.url:
             return []
 
-        parsed = urlparse(target.url)
-        params = parse_qs(parsed.query)
+        # Build list of URLs to test: start URL + crawled URLs that have query params
+        urls_to_test: list[str] = [target.url]
+        if context:
+            for crawled_url in (context.crawl_urls or [])[:20]:
+                if crawled_url != target.url and "?" in crawled_url:
+                    urls_to_test.append(crawled_url)
 
-        results = []
+        results: list[Result] = []
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            # Fetch baseline response and abort if MARKER already present
-            try:
-                baseline_resp = await client.get(target.url)
-                if MARKER in baseline_resp.text:
-                    return []
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
+            for test_target_url in urls_to_test:
+                parsed = urlparse(test_target_url)
+                params = parse_qs(parsed.query)
+                if not params:
+                    continue
 
-            # --- GET parameter fuzzing ---
-            if params:
+                # Fetch baseline response and skip if MARKER already present
+                try:
+                    baseline_resp = await client.get(test_target_url)
+                    if MARKER in baseline_resp.text:
+                        continue
+                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                    continue
+
                 capped_params = dict(list(params.items())[:MAX_PARAMS])
+
+                # --- GET parameter fuzzing ---
                 for param_name, values in capped_params.items():
                     original = values[0] if values else ""
                     for payload in PAYLOADS:
@@ -76,7 +86,7 @@ class CmdiPlugin(PluginBase):
                                 description=f"Output-based CMDi with payload: {payload}",
                                 evidence=MARKER,
                                 cwe_id="CWE-78",
-                                endpoint=target.url,
+                                endpoint=test_target_url,
                                 param_name=param_name,
                                 curl_command=f"curl {shlex.quote(test_url)}",
                                 rule_id="cmdi_output_based",
@@ -96,7 +106,7 @@ class CmdiPlugin(PluginBase):
                             if form_action not in post_urls:
                                 post_urls.append(form_action)
                             for field in form.get("fields", []):
-                                fname = field.get("name", "")
+                                fname = field.get("name", "") if isinstance(field, dict) else field
                                 if fname and fname not in form_fields:
                                     form_fields.append(fname)
 

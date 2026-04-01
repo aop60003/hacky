@@ -54,24 +54,34 @@ class SqliPlugin(PluginBase):
         if not target.url:
             return []
 
-        parsed = urlparse(target.url)
-        params = parse_qs(parsed.query)
+        # Build list of URLs to test: start URL + crawled URLs that have query params
+        urls_to_test: list[str] = [target.url]
+        if context:
+            for crawled_url in (context.crawl_urls or [])[:20]:
+                if crawled_url != target.url and "?" in crawled_url:
+                    urls_to_test.append(crawled_url)
 
-        results = []
+        results: list[Result] = []
         async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            # Fetch baseline response to compare against
-            try:
-                baseline_resp = await client.get(target.url)
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
+            for test_target_url in urls_to_test:
+                parsed = urlparse(test_target_url)
+                params = parse_qs(parsed.query)
 
-            # Skip patterns that already fire on the baseline (pre-existing errors)
-            baseline_matched_patterns = {p for p in SQL_ERROR_PATTERNS if p.search(baseline_resp.text)}
+                if not params:
+                    continue
 
-            # --- GET parameter fuzzing ---
-            if params:
+                # Fetch baseline response to compare against
+                try:
+                    baseline_resp = await client.get(test_target_url)
+                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                    continue
+
+                # Skip patterns that already fire on the baseline (pre-existing errors)
+                baseline_matched_patterns = {p for p in SQL_ERROR_PATTERNS if p.search(baseline_resp.text)}
+
                 capped_params = dict(list(params.items())[:MAX_PARAMS])
 
+                # --- GET parameter fuzzing (error-based) ---
                 for param_name, values in capped_params.items():
                     original_value = values[0] if values else ""
                     for payload in PAYLOADS:
@@ -98,7 +108,7 @@ class SqliPlugin(PluginBase):
                                     description=f"Error-based SQLi detected with payload: {payload}",
                                     evidence=pattern.pattern,
                                     cwe_id="CWE-89",
-                                    endpoint=target.url,
+                                    endpoint=test_target_url,
                                     param_name=param_name,
                                     curl_command=f"curl {shlex.quote(test_url)}",
                                     rule_id="sqli_error_based",
@@ -111,7 +121,7 @@ class SqliPlugin(PluginBase):
                 for _ in range(3):
                     try:
                         t0 = time.monotonic()
-                        await client.get(target.url)
+                        await client.get(test_target_url)
                         baseline_samples.append(time.monotonic() - t0)
                     except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
                         pass
@@ -159,7 +169,7 @@ class SqliPlugin(PluginBase):
                                     f"delay: {delay:.2f}s, confirmation delay: {confirm_delay:.2f}s"
                                 ),
                                 cwe_id="CWE-89",
-                                endpoint=target.url,
+                                endpoint=test_target_url,
                                 param_name=param_name,
                                 curl_command=f"curl {shlex.quote(test_url)}",
                                 rule_id="sqli_time_based",
@@ -180,11 +190,19 @@ class SqliPlugin(PluginBase):
                             if form_action not in post_urls:
                                 post_urls.append(form_action)
                             for field in form.get("fields", []):
-                                fname = field.get("name", "")
+                                fname = field.get("name", "") if isinstance(field, dict) else field
                                 if fname and fname not in form_fields:
                                     form_fields.append(fname)
 
                 fields_to_fuzz = form_fields if form_fields else post_fields
+
+                start_parsed = urlparse(target.url)
+                start_baseline_matched: set = set()
+                try:
+                    start_baseline = await client.get(target.url)
+                    start_baseline_matched = {p for p in SQL_ERROR_PATTERNS if p.search(start_baseline.text)}
+                except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                    pass
 
                 for post_url in post_urls[:5]:
                     # Fetch a POST baseline for this URL to exclude pre-existing errors
@@ -207,7 +225,7 @@ class SqliPlugin(PluginBase):
                                 continue
 
                             for pattern in SQL_ERROR_PATTERNS:
-                                if pattern in baseline_matched_patterns:
+                                if pattern in start_baseline_matched:
                                     continue
                                 if pattern in post_baseline_matched:
                                     continue

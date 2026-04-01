@@ -12,6 +12,8 @@ from vibee_hacker.core.plugin_base import PluginBase
 
 logger = logging.getLogger(__name__)
 
+_CRAWLER_TIMEOUT = 60  # seconds for entire crawl operation
+
 
 class ScanEngine:
     """Core scan engine that manages plugin lifecycle."""
@@ -39,6 +41,12 @@ class ScanEngine:
             by_phase[p.phase].append(p)
 
         context = InterPhaseContext()
+
+        # Auto-crawl: discover endpoints before running phases so all plugins
+        # have access to crawl_urls / crawl_forms / crawl_parameters.
+        if target.mode == "blackbox" and target.url:
+            await self._auto_crawl(target, context)
+
         all_results: list[Result] = []
         for phase_num in sorted(by_phase.keys()):
             phase_plugins = by_phase[phase_num]
@@ -47,6 +55,36 @@ class ScanEngine:
 
         all_results.sort(key=lambda r: r.base_severity, reverse=True)
         return all_results
+
+    async def _auto_crawl(self, target: Target, context: InterPhaseContext) -> None:
+        """Run the crawler against a blackbox target and populate context."""
+        from vibee_hacker.core.crawler import Crawler  # local import avoids circular dependency
+        crawler = Crawler(
+            max_depth=2,
+            max_pages=50,
+            timeout=10,
+            verify_ssl=target.verify_ssl,
+            auth_headers=None,
+        )
+        try:
+            crawl_result = await asyncio.wait_for(
+                crawler.crawl(target.url), timeout=_CRAWLER_TIMEOUT
+            )
+            context.crawl_urls = crawl_result.urls
+            context.crawl_forms = [
+                {"action": f.action, "method": f.method, "fields": f.fields}
+                for f in crawl_result.forms
+            ]
+            context.crawl_parameters = crawl_result.parameters
+            logger.info(
+                "Crawler found %d URLs, %d forms",
+                len(crawl_result.urls),
+                len(crawl_result.forms),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Auto-crawler timed out after %ds", _CRAWLER_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Auto-crawler failed: %s", exc)
 
     async def _run_phase(
         self, target: Target, plugins: list[PluginBase], context: InterPhaseContext | None = None
