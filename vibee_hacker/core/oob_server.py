@@ -26,7 +26,7 @@ class OOBCallback:
 class OOBServer:
     """Simple HTTP server that captures out-of-band callbacks."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 9999):
+    def __init__(self, host: str = "127.0.0.1", port: int = 9999):
         self.host = host
         self.port = port
         self.callbacks: list[OOBCallback] = []

@@ -19,11 +19,13 @@ class HeadlessCrawler:
         max_depth: int = 2,
         timeout: int = 10000,  # ms
         auth_headers: dict[str, str] | None = None,
+        verify_ssl: bool = True,
     ):
         self.max_pages = max_pages
         self.max_depth = max_depth
         self.timeout = timeout
         self.auth_headers = auth_headers or {}
+        self.verify_ssl = verify_ssl
 
     async def crawl(self, start_url: str) -> CrawlResult:
         """Crawl using headless Chromium. Returns CrawlResult."""
@@ -39,7 +41,7 @@ class HeadlessCrawler:
                 browser = await p.chromium.launch(headless=True)
                 context = await browser.new_context(
                     extra_http_headers=self.auth_headers,
-                    ignore_https_errors=True,
+                    ignore_https_errors=not self.verify_ssl,
                 )
                 page = await context.new_page()
 

@@ -33,7 +33,7 @@ class TestOOBServer:
         server = OOBServer()
         token = server.generate_token("test")
         url = server.get_callback_url(token)
-        assert url == f"http://0.0.0.0:9999/cb/{token}"
+        assert url == f"http://127.0.0.1:9999/cb/{token}"
 
     def test_check_token_not_found(self):
         server = OOBServer()
