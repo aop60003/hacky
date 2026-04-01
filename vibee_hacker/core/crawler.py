@@ -191,10 +191,12 @@ class Crawler:
                     for link in parser.links:
                         abs_link = urljoin(url, link)
                         link_domain = urlparse(abs_link).netloc
+                        link_hostname = urlparse(abs_link).hostname or ""
+                        is_same_host = link_hostname == start_hostname
                         if (
                             link_domain == base_domain
                             and abs_link not in visited
-                            and self._is_safe_url(abs_link)
+                            and (is_same_host or self._is_safe_url(abs_link))
                         ):
                             queue.append((abs_link, depth + 1))
 
