@@ -40,7 +40,8 @@ class TestEndToEnd:
     def test_cli_version(self):
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
-        assert "1.0.0" in result.output
+        from vibee_hacker import __version__
+        assert __version__ in result.output
 
     def test_plugin_loader_discovers_nothing_in_empty(self, tmp_path):
         loader = PluginLoader()
