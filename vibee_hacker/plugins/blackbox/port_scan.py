@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import urlparse
 
 import httpx
@@ -9,7 +10,7 @@ import httpx
 from vibee_hacker.core.models import InterPhaseContext, Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
 
-PORTS = [80, 443, 8080, 8443, 3000, 5000, 8000, 8888, 9090, 9200, 27017]
+PORTS = [80, 443, 8080, 8443, 3000, 5000, 8000, 8888, 9090, 9200]
 PROBE_TIMEOUT = 3.0
 
 
@@ -34,19 +35,16 @@ class PortScanPlugin(PluginBase):
         if not host:
             return []
 
-        results: list[Result] = []
+        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=PROBE_TIMEOUT) as client:
 
-        async with httpx.AsyncClient(verify=False, timeout=PROBE_TIMEOUT) as client:
-            for port in PORTS:
-                # Use http:// for non-443/8443 ports, https:// for common TLS ports
+            async def probe_port(port: int) -> Result | None:
                 scheme = "https" if port in (443, 8443) else "http"
                 probe_url = f"{scheme}://{host}:{port}/"
-
                 try:
                     resp = await client.get(probe_url)
                 except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError,
                         httpx.TimeoutException, httpx.HTTPStatusError):
-                    continue
+                    return None
 
                 server_header = resp.headers.get("server", "")
                 powered_by = resp.headers.get("x-powered-by", "")
@@ -56,7 +54,7 @@ class PortScanPlugin(PluginBase):
                 if powered_by:
                     banner += f", X-Powered-By: {powered_by}"
 
-                results.append(Result(
+                return Result(
                     plugin_name=self.name,
                     base_severity=self.base_severity,
                     title=f"Open port {port} on {host}",
@@ -70,6 +68,8 @@ class PortScanPlugin(PluginBase):
                         "Restrict access to non-essential ports via firewall rules."
                     ),
                     rule_id="port_open",
-                ))
+                )
 
-        return results
+            probe_results = await asyncio.gather(*(probe_port(p) for p in PORTS))
+
+        return [r for r in probe_results if r is not None]

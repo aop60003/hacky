@@ -69,19 +69,19 @@ def _detect_from_response(resp: httpx.Response) -> list[str]:
     for label, pat in _SERVER_PATTERNS:
         if pat.search(server):
             add(label)
-            # Include version info if present
-            version_match = re.search(r"[\d.]+", server)
+            # Include version tied to the matched label (e.g. "Apache/2.4.51")
+            version_match = re.search(rf"{re.escape(label)}[/ ]?([\d.]+)", server, re.I)
             if version_match:
-                add(f"{label}/{version_match.group()}")
+                add(f"{label}/{version_match.group(1)}")
 
     # X-Powered-By
     powered_by = resp.headers.get("x-powered-by", "")
     for label, pat in _POWERED_BY_PATTERNS:
         if pat.search(powered_by):
             add(label)
-            version_match = re.search(r"[\d.]+", powered_by)
+            version_match = re.search(rf"{re.escape(label)}[/ ]?([\d.]+)", powered_by, re.I)
             if version_match:
-                add(f"{label}/{version_match.group()}")
+                add(f"{label}/{version_match.group(1)}")
 
     # Set-Cookie
     set_cookie = resp.headers.get("set-cookie", "")

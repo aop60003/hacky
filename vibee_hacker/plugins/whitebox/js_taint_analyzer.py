@@ -116,12 +116,15 @@ def _analyze_js_file(filepath: str, source: str) -> list[Result]:
             for j in range(i + 1, end):
                 check_line = lines[j]
 
-                # If the variable is explicitly sanitized, stop tracking it
+                # If the variable is explicitly sanitized via reassignment, stop tracking it
+                # Only clear taint when the tainted variable appears on the LEFT side of
+                # an assignment (i.e., taintedVar = sanitize(taintedVar))
                 if tainted_var and _line_contains_sanitizer(check_line):
-                    # Only stop if the sanitizer wraps our variable
                     if tainted_var in check_line:
-                        sanitized = True
-                        break
+                        assign = _extract_assigned_var(check_line)
+                        if assign and assign[0] == tainted_var:
+                            sanitized = True
+                            break
 
                 # Check if a sink uses our tainted variable (or raw source)
                 sink_match = _find_sink_in_line(check_line)

@@ -27,7 +27,9 @@ class TestSqliPostBody:
         """SQL error in POST body response is reported."""
         # Baseline GET returns normal
         httpx_mock.add_response(text="<html>Normal page</html>")
-        # First POST returns SQL error
+        # POST baseline (empty data) returns normal
+        httpx_mock.add_response(text="<html>Normal page</html>")
+        # First fuzz POST returns SQL error
         httpx_mock.add_response(
             text="You have an error in your SQL syntax near",
         )

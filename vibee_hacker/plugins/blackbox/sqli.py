@@ -47,6 +47,9 @@ class SqliPlugin(PluginBase):
     detection_criteria = "SQL error patterns in response after injecting SQL payloads"
     expected_evidence = "SQL syntax error message in HTTP response body"
 
+    def is_applicable(self, target: Target) -> bool:
+        return bool(target.url)
+
     async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
         if not target.url:
             return []
@@ -184,6 +187,14 @@ class SqliPlugin(PluginBase):
                 fields_to_fuzz = form_fields if form_fields else post_fields
 
                 for post_url in post_urls[:5]:
+                    # Fetch a POST baseline for this URL to exclude pre-existing errors
+                    try:
+                        post_baseline = await client.post(post_url, data={})
+                        post_baseline_text = post_baseline.text[:1_000_000]
+                    except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                        continue
+                    post_baseline_matched = {p for p in SQL_ERROR_PATTERNS if p.search(post_baseline_text)}
+
                     for field in fields_to_fuzz[:MAX_PARAMS]:
                         for payload in PAYLOADS:
                             data = {field: payload}
@@ -197,6 +208,8 @@ class SqliPlugin(PluginBase):
 
                             for pattern in SQL_ERROR_PATTERNS:
                                 if pattern in baseline_matched_patterns:
+                                    continue
+                                if pattern in post_baseline_matched:
                                     continue
                                 if pattern.search(resp.text):
                                     results.append(Result(
