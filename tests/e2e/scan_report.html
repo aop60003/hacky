@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIBEE-Hacker Scan Report</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#eee;padding:20px}
+.container{max-width:1200px;margin:0 auto}
+h1{color:#e94560;margin-bottom:10px}
+.meta{color:#888;margin-bottom:20px}
+.summary{display:flex;gap:15px;margin-bottom:30px;flex-wrap:wrap}
+.stat{background:#16213e;padding:15px 25px;border-radius:8px;text-align:center}
+.stat .count{font-size:2em;font-weight:bold}
+.stat .label{font-size:.85em;color:#888}
+.critical .count{color:#ff4444}
+.high .count{color:#ff8c00}
+.medium .count{color:#ffd700}
+.low .count{color:#4da6ff}
+.info .count{color:#888}
+table{width:100%;border-collapse:collapse;margin-top:20px}
+th{background:#16213e;padding:12px;text-align:left;border-bottom:2px solid #333}
+td{padding:10px 12px;border-bottom:1px solid #333;vertical-align:top}
+tr:hover{background:#16213e}
+.badge{padding:3px 10px;border-radius:4px;font-size:.8em;font-weight:bold;text-transform:uppercase}
+.badge-critical{background:#ff4444;color:#fff}
+.badge-high{background:#ff8c00;color:#fff}
+.badge-medium{background:#ffd700;color:#000}
+.badge-low{background:#4da6ff;color:#fff}
+.badge-info{background:#666;color:#fff}
+.evidence{font-family:monospace;font-size:.85em;background:#0f0f23;padding:5px 8px;border-radius:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cwe{color:#4da6ff;font-size:.85em}
+.desc{max-width:300px;font-size:.9em}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>VIBEE-Hacker Scan Report</h1>
+<div class="meta">Target: http://127.0.0.1:5555/ | Mode: blackbox | Date: 2026-04-01 07:01 UTC</div>
+<div class="summary">
+<div class="stat critical"><div class="count">5</div><div class="label">Critical</div></div>
+<div class="stat high"><div class="count">3</div><div class="label">High</div></div>
+<div class="stat medium"><div class="count">10</div><div class="label">Medium</div></div>
+<div class="stat low"><div class="count">1</div><div class="label">Low</div></div>
+<div class="stat info"><div class="count">7</div><div class="label">Info</div></div>
+</div>
+<h2>Findings (26)</h2>
+<table>
+<tr><th>Severity</th><th>Plugin</th><th>Title</th><th>Description</th><th>CWE</th><th>Evidence</th></tr>
+
+<tr>
+<td><span class="badge badge-critical">critical</span></td>
+<td>cve_lookup</td>
+<td>CVE-2021-41773: Apache HTTP Server 2.4.49 path traversal and RCE (mod_cgi)</td>
+<td class="desc">Detected version &#39;Werkzeug/3.1.7 Python/3.10.11, Apache/2.4.49 (Ubuntu)&#39; matches known vulnerability CVE-2021-41773. Apache HTTP Server 2.4.49 path traversal and RCE (mod_cgi)</td>
+<td class="cwe">CWE-22</td>
+<td><div class="evidence">Version string: Werkzeug/3.1.7 Python/3.10.11, Apache/2.4.49 (Ubuntu)</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-critical">critical</span></td>
+<td>api_key_exposure</td>
+<td>Exposed API key: generic_api_key</td>
+<td class="desc">An API key or secret of type &#39;generic_api_key&#39; was found in the response from http://127.0.0.1:5555/static/app.js. Exposed keys can be exploited by attackers to access third-party services or internal</td>
+<td class="cwe">CWE-798</td>
+<td><div class="evidence">generic_api_key: abcd***56</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-critical">critical</span></td>
+<td>unnecessary_services</td>
+<td>Unnecessary service exposed: /.env</td>
+<td class="desc">A management or diagnostic endpoint is publicly accessible at http://127.0.0.1:5555/.env. This may expose sensitive configuration, environment variables, or system information.</td>
+<td class="cwe">CWE-16</td>
+<td><div class="evidence">Path: /.env | Status: 200 | Content length: 81</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-critical">critical</span></td>
+<td>dir_enum</td>
+<td>Sensitive file exposed: /.env</td>
+<td class="desc">The path /.env is publicly accessible and returned a 200 response with 81 bytes of content. This may expose sensitive configuration data, credentials, or source history.</td>
+<td class="cwe">CWE-538</td>
+<td><div class="evidence">DB_PASSWORD=supersecret123
+API_KEY=sk_test_abc123def456ghi789
+SECRET_KEY=mysecret</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-critical">critical</span></td>
+<td>dir_enum</td>
+<td>Sensitive file exposed: /.git/config</td>
+<td class="desc">The path /.git/config is publicly accessible and returned a 200 response with 107 bytes of content. This may expose sensitive configuration data, credentials, or source history.</td>
+<td class="cwe">CWE-538</td>
+<td><div class="evidence">[core]
+	repositoryformatversion = 0
+	bare = false
+[remote &#34;origin&#34;]
+	url = https://github.com/test/repo.git</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-high">high</span></td>
+<td>csp_analysis</td>
+<td>Content-Security-Policy header missing</td>
+<td class="desc">The application does not set a Content-Security-Policy header, leaving it vulnerable to XSS and data injection attacks.</td>
+<td class="cwe">CWE-693</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-high">high</span></td>
+<td>debug_detection</td>
+<td>Debug endpoint exposed: /debug</td>
+<td class="desc">A debug endpoint is accessible at http://127.0.0.1:5555/debug and contains debug information (matched: Traceback).</td>
+<td class="cwe">CWE-489</td>
+<td><div class="evidence">Path: /debug | Status: 200 | Pattern: Traceback</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-high">high</span></td>
+<td>forced_browsing</td>
+<td>Sensitive file exposed: /.env</td>
+<td class="desc">The sensitive file http://127.0.0.1:5555/.env is publicly accessible and its content matches known file signatures. This can expose credentials, configuration details, database dumps, or source contro</td>
+<td class="cwe">CWE-425</td>
+<td><div class="evidence">Path: /.env | Signatures matched: [&#39;DB_PASSWORD&#39;, &#39;API_KEY&#39;] | Status: 200</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>clickjacking</td>
+<td>Clickjacking: no frame embedding protection</td>
+<td class="desc">The response lacks both an X-Frame-Options header and a CSP frame-ancestors directive. An attacker can embed this page in an iframe to perform clickjacking attacks.</td>
+<td class="cwe">CWE-1021</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>email_security</td>
+<td>MTA-STS policy not found</td>
+<td class="desc">No MTA-STS policy was found at http://127.0.0.1:5555/.well-known/mta-sts.txt. MTA-STS enforces TLS for email delivery and prevents downgrade attacks.</td>
+<td class="cwe">CWE-290</td>
+<td><div class="evidence">GET http://127.0.0.1:5555/.well-known/mta-sts.txt returned no valid MTA-STS policy</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>email_security</td>
+<td>Email authentication headers not present</td>
+<td class="desc">No email authentication headers (Authentication-Results, DKIM-Signature) were found in the response from http://127.0.0.1:5555/. This may indicate SPF, DKIM, and DMARC are not configured.</td>
+<td class="cwe">CWE-290</td>
+<td><div class="evidence">No email authentication headers in response from http://127.0.0.1:5555/</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>header_check</td>
+<td>Missing header: Content-Security-Policy</td>
+<td class="desc">Content-Security-Policy header is not set. CSP prevents XSS and data injection attacks.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>header_check</td>
+<td>Missing header: X-Frame-Options</td>
+<td class="desc">X-Frame-Options header is not set. Prevents clickjacking by controlling iframe embedding.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>header_check</td>
+<td>Missing header: X-Content-Type-Options</td>
+<td class="desc">X-Content-Type-Options header is not set. Prevents MIME type sniffing.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>header_check</td>
+<td>Missing header: Strict-Transport-Security</td>
+<td class="desc">Strict-Transport-Security header is not set. Enforces HTTPS connections.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>header_check</td>
+<td>Missing header: Referrer-Policy</td>
+<td class="desc">Referrer-Policy header is not set. Controls referrer information leakage.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>header_check</td>
+<td>Missing header: Permissions-Policy</td>
+<td class="desc">Permissions-Policy header is not set. Controls browser feature permissions.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">-</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-medium">medium</span></td>
+<td>csrf_check</td>
+<td>CSRF token missing in form #1</td>
+<td class="desc">Form #1 at http://127.0.0.1:5555/ does not contain a recognisable CSRF token hidden input field. State-changing requests from this form may be forgeable by a cross-site attacker.</td>
+<td class="cwe">CWE-352</td>
+<td><div class="evidence">Form HTML (first 200 chars): &lt;form action=&#34;/comment&#34; method=&#34;POST&#34;&gt;
+    &lt;textarea name=&#34;comment&#34;&gt;&lt;/textarea&gt;
+    &lt;input </div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-low">low</span></td>
+<td>server_info_leak</td>
+<td>Server information disclosure via Server header</td>
+<td class="desc">The Server response header discloses server/technology information: &#39;Werkzeug/3.1.7 Python/3.10.11, Apache/2.4.49 (Ubuntu)&#39;. This helps attackers identify vulnerable software versions.</td>
+<td class="cwe">CWE-200</td>
+<td><div class="evidence">Server: Werkzeug/3.1.7 Python/3.10.11, Apache/2.4.49 (Ubuntu)</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-info">info</span></td>
+<td>tech_fingerprint</td>
+<td>Technology detected: Apache</td>
+<td class="desc">Identified &#39;Apache&#39; from HTTP response analysis.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">Detected technologies: Apache, Apache/2.4.49, PHP, PHP/7.4.3, WordPress</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-info">info</span></td>
+<td>tech_fingerprint</td>
+<td>Technology detected: Apache/2.4.49</td>
+<td class="desc">Identified &#39;Apache/2.4.49&#39; from HTTP response analysis.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">Detected technologies: Apache, Apache/2.4.49, PHP, PHP/7.4.3, WordPress</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-info">info</span></td>
+<td>tech_fingerprint</td>
+<td>Technology detected: PHP</td>
+<td class="desc">Identified &#39;PHP&#39; from HTTP response analysis.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">Detected technologies: Apache, Apache/2.4.49, PHP, PHP/7.4.3, WordPress</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-info">info</span></td>
+<td>tech_fingerprint</td>
+<td>Technology detected: PHP/7.4.3</td>
+<td class="desc">Identified &#39;PHP/7.4.3&#39; from HTTP response analysis.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">Detected technologies: Apache, Apache/2.4.49, PHP, PHP/7.4.3, WordPress</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-info">info</span></td>
+<td>tech_fingerprint</td>
+<td>Technology detected: WordPress</td>
+<td class="desc">Identified &#39;WordPress&#39; from HTTP response analysis.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">Detected technologies: Apache, Apache/2.4.49, PHP, PHP/7.4.3, WordPress</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-info">info</span></td>
+<td>whois_asn</td>
+<td>Target info collected: 127.0.0.1</td>
+<td class="desc">Basic target information collected from http://127.0.0.1:5555/. Status: 200 | Server: Werkzeug/3.1.7 Python/3.10.11, Apache/2.4.49 (Ubuntu) | X-Powered-By: PHP/7.4.3</td>
+<td class="cwe">-</td>
+<td><div class="evidence">Status: 200 | Server: Werkzeug/3.1.7 Python/3.10.11, Apache/2.4.49 (Ubuntu) | X-Powered-By: PHP/7.4.3</div></td>
+</tr>
+
+<tr>
+<td><span class="badge badge-info">info</span></td>
+<td>security_txt_check</td>
+<td>security.txt not found</td>
+<td class="desc">The application does not serve a /.well-known/security.txt file. RFC 9116 recommends providing this file to allow security researchers to report vulnerabilities through a defined disclosure channel.</td>
+<td class="cwe">-</td>
+<td><div class="evidence">HTTP 404 at http://127.0.0.1:5555/.well-known/security.txt</div></td>
+</tr>
+
+</table>
+</div>
+</body>
+</html>
