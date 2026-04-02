@@ -27,7 +27,7 @@ class TestAcquire:
     def test_acquire_no_delay(self):
         """acquire() with 0 delay should complete instantly and increment total_requests."""
         rl = DynamicRateLimiter(initial_delay_ms=0)
-        asyncio.get_event_loop().run_until_complete(rl.acquire())
+        asyncio.new_event_loop().run_until_complete(rl.acquire())
         assert rl.stats.total_requests == 1
 
     def test_acquire_increments_total_requests(self):
@@ -150,7 +150,7 @@ class TestMinDelayFloor:
 class TestStatsTracking:
     def test_stats_tracking_all_fields(self):
         rl = DynamicRateLimiter(initial_delay_ms=0)
-        asyncio.get_event_loop().run_until_complete(rl.acquire())
+        asyncio.new_event_loop().run_until_complete(rl.acquire())
         rl.report_success(120.0)
         rl.report_throttled()
         rl.report_error()
