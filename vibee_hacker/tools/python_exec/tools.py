@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 MAX_OUTPUT_SIZE = 50_000
 
 BLOCKED_MODULES = {"os", "subprocess", "shutil", "sys", "ctypes", "importlib", "pathlib"}
-BLOCKED_BUILTINS = {"exec", "eval", "compile", "__import__", "open", "breakpoint"}
+BLOCKED_BUILTINS = {
+    "exec", "eval", "compile", "__import__", "open", "breakpoint",
+    "getattr", "setattr", "delattr", "globals", "locals", "vars",
+    "type", "memoryview", "bytearray",
+}
+BLOCKED_DUNDER = {"__import__", "__builtins__", "__loader__", "__spec__"}
 
 
 def _validate_code(code: str) -> Tuple[bool, str]:
@@ -48,6 +53,19 @@ def _validate_code(code: str) -> Tuple[bool, str]:
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in BLOCKED_BUILTINS:
                 return False, f"Blocked builtin: {node.func.id}"
+            # Block method calls on __builtins__ etc.
+            if isinstance(node.func, ast.Attribute):
+                if isinstance(node.func.value, ast.Name) and node.func.value.id.startswith("__"):
+                    return False, f"Blocked dunder access: {node.func.value.id}"
+
+        # Block direct dunder attribute access (e.g., __builtins__, __import__)
+        if isinstance(node, ast.Attribute):
+            if node.attr in BLOCKED_DUNDER or node.attr.startswith("__"):
+                return False, f"Blocked dunder attribute: {node.attr}"
+
+        # Block string-based chr() obfuscation patterns
+        if isinstance(node, ast.Name) and node.id in BLOCKED_DUNDER:
+            return False, f"Blocked dunder name: {node.id}"
 
     return True, "OK"
 
@@ -88,7 +106,7 @@ async def python_execute(
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, script_path,
+            sys.executable, "-S", "-I", script_path,  # -S: no site-packages, -I: isolated mode
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

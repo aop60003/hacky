@@ -80,3 +80,29 @@ def test_sys_import_blocked():
     ok, msg = _validate_code(code)
     assert ok is False
     assert "sys" in msg
+
+
+def test_getattr_blocked():
+    code = "a = getattr(object, '__class__')"
+    ok, msg = _validate_code(code)
+    assert ok is False
+    assert "getattr" in msg
+
+
+def test_dunder_builtins_blocked():
+    code = "x = __builtins__"
+    ok, msg = _validate_code(code)
+    assert ok is False
+    assert "dunder" in msg.lower() or "__builtins__" in msg
+
+
+def test_dunder_attribute_blocked():
+    code = "x = foo.__class__.__bases__"
+    ok, msg = _validate_code(code)
+    assert ok is False
+
+
+def test_dunder_method_call_blocked():
+    code = "__builtins__.get('eval')"
+    ok, msg = _validate_code(code)
+    assert ok is False
