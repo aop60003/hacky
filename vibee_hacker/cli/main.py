@@ -65,11 +65,12 @@ def cli():
 @click.option("--targets-file", type=click.Path(exists=True), default=None, help="File with one target URL per line")
 @click.option("--cookie", type=str, default=None, help="Cookie header (e.g., 'session=abc123')")
 @click.option("--header", "extra_headers", type=str, multiple=True, help="Extra header (repeatable, e.g., 'Authorization: Bearer token')")
+@click.option("--policy", type=str, default=None, help="Scan policy name or YAML/JSON file path")
 def scan(
     target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet,
     proxy, safe_mode, concurrency, delay, insecure, profile,
     save_session, resume, baseline, false_positive,
-    targets_file, cookie, extra_headers,
+    targets_file, cookie, extra_headers, policy,
 ):
     """Run a security scan against a target."""
     # Apply profile presets first; explicit flags override them
@@ -88,6 +89,21 @@ def scan(
             effective_safe_mode = preset["safe_mode"]
 
     verify_ssl = not insecure
+
+    # Resolve scan policy
+    active_policy = None
+    if policy:
+        from vibee_hacker.core.scan_policy import BUILTIN_POLICIES, ScanPolicy
+        import os
+        if policy in BUILTIN_POLICIES:
+            active_policy = BUILTIN_POLICIES[policy]
+        elif os.path.exists(policy):
+            active_policy = ScanPolicy.from_file(policy)
+        else:
+            console.print(f"[red]Unknown policy: {policy}. Available: {', '.join(BUILTIN_POLICIES)}[/red]")
+            raise SystemExit(1)
+        if not quiet:
+            console.print(f"[cyan]Policy: {active_policy.name} — {active_policy.description}[/cyan]")
 
     # Build auth_headers from --cookie and --header options
     auth_headers: dict[str, str] = {}
