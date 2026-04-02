@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibee-hacker"
-version = "2.1.0"
-description = "Security vulnerability scanner with 135 plugins — blackbox + whitebox + IaC + LLM enhancement"
+version = "2.2.0"
+description = "Security vulnerability scanner with 138 plugins — blackbox + whitebox + IaC + LLM enhancement"
 requires-python = ">=3.10"
 readme = "README.md"
 license = {text = "MIT"}
