@@ -40,7 +40,7 @@ def cli():
 @click.option("--plugin", type=str, help="Comma-separated plugin names")
 @click.option("--output", "-o", type=click.Path(), help="Output file path")
 @click.option(
-    "--format", "fmt", default="json", type=click.Choice(["json", "html", "sarif"])
+    "--format", "fmt", default="json", type=click.Choice(["json", "html", "sarif", "pdf"])
 )
 @click.option("--timeout", default=60, type=int, help="Per-plugin timeout (seconds)")
 @click.option(
@@ -244,6 +244,9 @@ def scan(
         elif fmt == "sarif":
             from vibee_hacker.reports.sarif_report import SarifReporter
             reporter = SarifReporter()
+        elif fmt == "pdf":
+            from vibee_hacker.reports.pdf_report import PdfReporter
+            reporter = PdfReporter()
         else:
             from vibee_hacker.reports.json_report import JsonReporter
             reporter = JsonReporter()
@@ -264,7 +267,7 @@ def scan(
 @cli.command()
 @click.option("--file", "-f", required=True, type=click.Path(exists=True), help="File with one target per line")
 @click.option("--mode", "-m", default="blackbox", type=click.Choice(["blackbox", "whitebox"]))
-@click.option("--format", "fmt", default="json", type=click.Choice(["json", "html", "sarif"]))
+@click.option("--format", "fmt", default="json", type=click.Choice(["json", "html", "sarif", "pdf"]))
 @click.option("--output-dir", "-o", default="./reports", help="Output directory for reports")
 @click.option("--quiet", is_flag=True)
 def batch(file, mode, fmt, output_dir, quiet):
@@ -307,6 +310,9 @@ def batch(file, mode, fmt, output_dir, quiet):
         elif fmt == "sarif":
             from vibee_hacker.reports.sarif_report import SarifReporter
             SarifReporter().generate(results, t, output_path)
+        elif fmt == "pdf":
+            from vibee_hacker.reports.pdf_report import PdfReporter
+            PdfReporter().generate(results, t, output_path)
         else:
             from vibee_hacker.reports.json_report import JsonReporter
             JsonReporter().generate(results, t, output_path)
