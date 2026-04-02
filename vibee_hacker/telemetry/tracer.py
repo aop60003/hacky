@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from datetime import datetime, timezone
@@ -28,6 +29,15 @@ _SENSITIVE_PATTERNS = [
     re.compile(r"(token[\"']?\s*[:=]\s*[\"']?)\S+", re.I),
 ]
 
+# Additional patterns for response bodies
+_BODY_SENSITIVE_PATTERNS = [
+    re.compile(r'(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})', re.I),  # JWT
+    re.compile(r'("password"\s*:\s*")[^"]+(")', re.I),  # JSON password field
+    re.compile(r'("secret"\s*:\s*")[^"]+(")', re.I),  # JSON secret field
+    re.compile(r'("token"\s*:\s*")[^"]+(")', re.I),  # JSON token field
+    re.compile(r'(AKIA[A-Z0-9]{16})', re.I),  # AWS Access Key
+]
+
 _global_tracer: Optional[Tracer] = None
 
 
@@ -46,6 +56,17 @@ def _sanitize(text: str) -> str:
     """Remove sensitive data from text."""
     for pattern in _SENSITIVE_PATTERNS:
         text = pattern.sub(r"\1[REDACTED]", text)
+    # Apply body-specific patterns
+    for pattern in _BODY_SENSITIVE_PATTERNS:
+        def _replace(m: re.Match) -> str:
+            if m.lastindex and m.lastindex >= 2:
+                # Two-group pattern: keep surrounding delimiters, redact value
+                return m.group(1) + "[REDACTED]" + m.group(2)
+            elif m.lastindex and m.lastindex >= 1:
+                # Single-group pattern capturing the whole sensitive value
+                return "[REDACTED]"
+            return "[REDACTED]"
+        text = pattern.sub(_replace, text)
     return text
 
 
@@ -133,8 +154,16 @@ class Tracer:
         try:
             with self._lock:
                 self._ensure_run_dir()
-                with self.events_file.open("a", encoding="utf-8") as f:
+                events_path = self.events_file
+                file_exists = events_path.exists()
+                with events_path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(record, default=str) + "\n")
+                # Set restrictive permissions (0o600) on newly created files
+                if not file_exists:
+                    try:
+                        os.chmod(events_path, 0o600)
+                    except OSError:
+                        pass  # Non-fatal on platforms that don't support it (e.g. Windows)
         except OSError as e:
             logger.debug("Failed to write telemetry event: %s", e)
 
