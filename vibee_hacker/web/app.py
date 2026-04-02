@@ -21,6 +21,9 @@ app = FastAPI(title="VIBEE-Hacker Dashboard", version=_version)
 _scan_results: dict[str, dict] = {}
 MAX_STORED_RESULTS = 100
 
+# Ordered scan history for stats/trends/compare endpoints
+scan_history: list[dict] = []
+
 
 class ScanRequest(BaseModel):
     target: str
@@ -116,6 +119,11 @@ async def run_scan(req: ScanRequest):
     if len(_scan_results) > MAX_STORED_RESULTS:
         oldest = min(_scan_results, key=lambda k: _scan_results[k]["scan_date"])
         del _scan_results[oldest]
+    # Also append to ordered history for stats/trends
+    severity_summary = _compute_severity_summary(scan_data.get("findings", []))
+    scan_data["severity_summary"] = severity_summary
+    scan_data["timestamp"] = scan_data["scan_date"]
+    scan_history.append(scan_data)
     return scan_data
 
 
@@ -129,3 +137,78 @@ async def get_result(scan_id: str):
     if scan_id not in _scan_results:
         raise HTTPException(status_code=404, detail="Scan not found")
     return _scan_results[scan_id]
+
+
+# ---------------------------------------------------------------------------
+# Dashboard v2: stats / trends / compare helpers
+# ---------------------------------------------------------------------------
+
+def _compute_severity_summary(findings: list[dict]) -> dict[str, int]:
+    summary: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for f in findings:
+        sev = str(f.get("base_severity", "")).lower()
+        if sev in summary:
+            summary[sev] += 1
+    return summary
+
+
+def _get_severity_distribution() -> dict[str, int]:
+    dist: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for scan in scan_history:
+        ss = scan.get("severity_summary", {})
+        for k in dist:
+            dist[k] += ss.get(k, 0)
+    return dist
+
+
+def _get_top_plugins() -> list[dict]:
+    counts: dict[str, int] = {}
+    for scan in scan_history:
+        for finding in scan.get("findings", []):
+            plugin = finding.get("plugin_name", "unknown")
+            counts[plugin] = counts.get(plugin, 0) + 1
+    return sorted(
+        [{"plugin": p, "count": c} for p, c in counts.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )[:10]
+
+
+@app.get("/api/stats")
+async def get_stats():
+    """Return scan statistics for dashboard charts."""
+    return {
+        "total_scans": len(scan_history),
+        "total_findings": sum(s.get("total_findings", 0) for s in scan_history),
+        "severity_distribution": _get_severity_distribution(),
+        "top_plugins": _get_top_plugins(),
+        "recent_scans": scan_history[-10:],
+    }
+
+
+@app.get("/api/trends")
+async def get_trends():
+    """Return trend data across multiple scans."""
+    trends = []
+    for scan in scan_history:
+        trends.append({
+            "date": scan.get("timestamp", ""),
+            "total": scan.get("total_findings", 0),
+            "critical": scan.get("severity_summary", {}).get("critical", 0),
+            "high": scan.get("severity_summary", {}).get("high", 0),
+        })
+    return {"trends": trends}
+
+
+@app.get("/api/compare/{scan_id1}/{scan_id2}")
+async def compare_scans(scan_id1: int, scan_id2: int):
+    """Compare two scans by index in scan_history."""
+    if scan_id1 >= len(scan_history) or scan_id2 >= len(scan_history):
+        return {"error": "Invalid scan ID"}
+    s1 = scan_history[scan_id1]
+    s2 = scan_history[scan_id2]
+    return {
+        "scan1": s1,
+        "scan2": s2,
+        "new_findings": s2.get("total_findings", 0) - s1.get("total_findings", 0),
+    }
