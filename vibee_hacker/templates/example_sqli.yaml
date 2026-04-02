@@ -1,0 +1,30 @@
+id: custom-sqli-error
+info:
+  name: Custom SQL Injection (Error-based)
+  severity: critical
+  description: Detects error-based SQL injection
+  cwe: CWE-89
+  tags:
+    - sqli
+    - injection
+    - owasp-top10
+
+requests:
+  - method: GET
+    path: "{{BaseURL}}"
+    payloads:
+      param_values:
+        - "'"
+        - "1' OR '1'='1"
+        - "1 UNION SELECT NULL--"
+    matchers:
+      - type: word
+        words:
+          - "SQL syntax"
+          - "mysql_fetch"
+          - "ORA-"
+          - "PostgreSQL"
+        condition: or
+      - type: status
+        status:
+          - 500
