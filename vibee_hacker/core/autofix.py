@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -152,3 +155,80 @@ class AutofixEngine:
             rule_id.startswith(k) or k.startswith(rule_id)
             for k in self._database
         )
+
+
+class LLMAutofixEngine(AutofixEngine):
+    """LLM-enhanced autofix engine.
+
+    Uses an LLM to generate context-specific fix suggestions when available.
+    Falls back to the static FIX_DATABASE when LLM is not configured.
+    """
+
+    def __init__(self, llm: object | None = None):
+        super().__init__()
+        self._llm = llm
+
+    async def get_llm_fix(
+        self,
+        rule_id: str,
+        title: str,
+        description: str,
+        evidence: str = "",
+        language: str | None = None,
+    ) -> str:
+        """Get an LLM-generated fix suggestion.
+
+        Returns the LLM response text, or falls back to static fixes.
+        """
+        if not self._llm or not self._llm.is_available:
+            return self._static_fallback(rule_id, language)
+
+        prompt = self._build_fix_prompt(rule_id, title, description, evidence, language)
+        try:
+            return await self._llm.complete(prompt, temperature=0.3, max_tokens=2048)
+        except Exception as e:
+            logger.warning("LLM autofix failed for %s: %s", rule_id, e)
+            return self._static_fallback(rule_id, language)
+
+    def _static_fallback(self, rule_id: str, language: str | None = None) -> str:
+        """Fall back to the static fix database."""
+        fixes = self.get_fixes(rule_id, language)
+        if fixes:
+            fix = fixes[0]
+            return (
+                f"## {fix.description}\n\n"
+                f"**Before (vulnerable):**\n```{fix.language}\n{fix.before}\n```\n\n"
+                f"**After (fixed):**\n```{fix.language}\n{fix.after}\n```"
+            )
+        return "No fix suggestion available for this vulnerability."
+
+    @staticmethod
+    def _build_fix_prompt(
+        rule_id: str,
+        title: str,
+        description: str,
+        evidence: str = "",
+        language: str | None = None,
+    ) -> str:
+        """Build a prompt for LLM-based fix generation."""
+        parts = [
+            "You are a security expert. Provide a concise, actionable fix for this vulnerability.",
+            "",
+            f"**Vulnerability:** {title}",
+            f"**Rule ID:** {rule_id}",
+            f"**Description:** {description}",
+        ]
+        if evidence:
+            parts.append(f"**Evidence:** {evidence[:500]}")
+        if language:
+            parts.append(f"**Language:** {language}")
+        parts.extend([
+            "",
+            "Provide:",
+            "1. A brief explanation of why this is dangerous",
+            "2. The specific code fix (before/after)",
+            "3. Any additional hardening recommendations",
+            "",
+            "Keep the response under 300 words. Use markdown formatting.",
+        ])
+        return "\n".join(parts)

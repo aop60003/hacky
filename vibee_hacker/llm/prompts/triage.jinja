@@ -1,0 +1,39 @@
+You are a senior application security engineer triaging scan results.
+
+Analyze the following vulnerability findings and provide:
+1. **Severity Re-assessment**: Adjust severity based on context (exploitability, impact, evidence quality)
+2. **Exploit Chain Detection**: Identify findings that can be chained together
+3. **False Positive Analysis**: Flag likely false positives with reasoning
+4. **Prioritized Remediation**: Rank findings by remediation priority
+
+## Scan Target
+- URL/Path: {{ target }}
+- Mode: {{ mode }}
+- Tech Stack: {{ tech_stack | join(', ') if tech_stack else 'Unknown' }}
+
+## Findings ({{ findings | length }} total)
+{% for f in findings %}
+### {{ loop.index }}. [{{ (f.base_severity or f.get("base_severity", "info")) | upper }}] {{ f.title or f.get("title", "") }}
+- **Plugin:** {{ f.plugin_name or f.get("plugin_name", "") }}
+- **Rule ID:** {{ f.rule_id or f.get("rule_id", "") }}
+- **Endpoint:** {{ f.endpoint or f.get("endpoint", "N/A") or "N/A" }}
+- **Evidence:** {{ (f.evidence or f.get("evidence", ""))[:200] or "None" }}
+- **Confidence:** {{ f.confidence or f.get("confidence", "tentative") }}
+{% endfor %}
+
+Respond in JSON format:
+```json
+{
+  "severity_adjustments": [
+    {"rule_id": "...", "original": "...", "adjusted": "...", "reason": "..."}
+  ],
+  "exploit_chains": [
+    {"chain": ["rule_id_1", "rule_id_2"], "description": "...", "impact": "..."}
+  ],
+  "false_positives": [
+    {"rule_id": "...", "reason": "..."}
+  ],
+  "priority_order": ["rule_id_1", "rule_id_2", "..."],
+  "executive_summary": "..."
+}
+```

@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import time
 from collections import defaultdict
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
 from vibee_hacker.core.plugin_base import PluginBase
+
+if TYPE_CHECKING:
+    from vibee_hacker.telemetry.tracer import Tracer
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +24,18 @@ _CRAWLER_TIMEOUT = 60  # seconds for entire crawl operation
 class ScanEngine:
     """Core scan engine that manages plugin lifecycle."""
 
-    def __init__(self, timeout_per_plugin: int = 60, max_concurrency: int = 10, safe_mode: bool = True):
+    def __init__(
+        self,
+        timeout_per_plugin: int = 60,
+        max_concurrency: int = 10,
+        safe_mode: bool = True,
+        tracer: "Tracer | None" = None,
+    ):
         self._plugins: list[PluginBase] = []
         self._timeout = timeout_per_plugin
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._safe_mode = safe_mode
+        self._tracer = tracer
 
     def register_plugin(self, plugin: PluginBase) -> None:
         self._plugins.append(plugin)
@@ -35,6 +47,7 @@ class ScanEngine:
         plugins: list[str] | None = None,
         safe_mode: bool | None = None,
     ) -> list[Result]:
+        scan_start = time.monotonic()
         effective_safe_mode = self._safe_mode if safe_mode is None else safe_mode
         applicable = self._filter_plugins(target, phases, plugins, effective_safe_mode)
         by_phase: dict[int, list[PluginBase]] = defaultdict(list)
@@ -42,6 +55,14 @@ class ScanEngine:
             by_phase[p.phase].append(p)
 
         context = InterPhaseContext()
+
+        # Log scan start
+        if self._tracer:
+            self._tracer.log_scan_started(
+                target=target.url or target.path or "",
+                mode=target.mode,
+                plugin_count=len(applicable),
+            )
 
         # Auto-crawl: discover endpoints before running phases so all plugins
         # have access to crawl_urls / crawl_forms / crawl_parameters.
@@ -80,14 +101,26 @@ class ScanEngine:
             ))
 
         all_results.sort(key=lambda r: r.base_severity, reverse=True)
+
+        # Log scan completion
+        if self._tracer:
+            from collections import Counter
+            severity_counts = Counter(str(r.context_severity) for r in all_results)
+            self._tracer.log_scan_completed(
+                total_findings=len(all_results),
+                duration_seconds=time.monotonic() - scan_start,
+                severity_summary=dict(severity_counts),
+            )
+
         return all_results
 
     async def _auto_crawl(self, target: Target, context: InterPhaseContext) -> None:
         """Run the crawler against a blackbox target and populate context."""
+        from vibee_hacker.config import Config
         from vibee_hacker.core.crawler import Crawler  # local import avoids circular dependency
         crawler = Crawler(
-            max_depth=2,
-            max_pages=50,
+            max_depth=Config.get_int("vibee_crawler_max_depth", 2),
+            max_pages=Config.get_int("vibee_crawler_max_pages", 50),
             timeout=10,
             verify_ssl=target.verify_ssl,
             auth_headers=None,
@@ -107,9 +140,13 @@ class ScanEngine:
                 len(crawl_result.urls),
                 len(crawl_result.forms),
             )
-        except (asyncio.TimeoutError, Exception) as e:
+            if self._tracer:
+                self._tracer.log_crawl_completed(len(crawl_result.urls), len(crawl_result.forms))
+        except Exception as e:
             logger.warning("Crawler failed: %s", e)
             context.crawl_status = "failed"
+            if self._tracer:
+                self._tracer.log_crawl_failed(str(e))
 
     async def _run_phase(
         self, target: Target, plugins: list[PluginBase], context: InterPhaseContext | None = None
@@ -182,16 +219,31 @@ class ScanEngine:
         self, plugin: PluginBase, target: Target, context: InterPhaseContext | None = None
     ) -> list[Result]:
         async with self._semaphore:
+            plugin_start = time.monotonic()
+            if self._tracer:
+                self._tracer.log_plugin_started(plugin.name, phase=plugin.phase)
             try:
                 results = await asyncio.wait_for(
                     plugin.run(target, context=context), timeout=self._timeout
                 )
+                duration = time.monotonic() - plugin_start
+                if self._tracer:
+                    self._tracer.log_plugin_completed(plugin.name, len(results), duration)
+                    for r in results:
+                        if r.plugin_status != "failed":
+                            self._tracer.log_finding(r.to_dict())
                 return results
             except asyncio.TimeoutError:
+                duration = time.monotonic() - plugin_start
                 logger.warning("Plugin %s timed out", plugin.name)
+                if self._tracer:
+                    self._tracer.log_plugin_failed(plugin.name, "Plugin timed out", duration)
                 return [self._make_error_result(plugin, "Plugin timed out")]
             except Exception as e:
+                duration = time.monotonic() - plugin_start
                 logger.warning("Plugin %s failed: %s", plugin.name, e)
+                if self._tracer:
+                    self._tracer.log_plugin_failed(plugin.name, str(e), duration)
                 return [self._make_error_result(plugin, f"Plugin error: {e}")]
 
     def _filter_plugins(
@@ -207,7 +259,8 @@ class ScanEngine:
         if phases:
             result = [p for p in result if p.phase in phases]
         if plugins:
-            result = [p for p in result if p.name in plugins]
+            plugin_set = set(plugins)
+            result = [p for p in result if p.name in plugin_set]
         return result
 
     @staticmethod

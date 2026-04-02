@@ -10,18 +10,15 @@ from rich.console import Console
 from rich.table import Table
 
 from vibee_hacker import __version__
+from vibee_hacker.config import Config, apply_saved_config
 from vibee_hacker.core.engine import ScanEngine
 from vibee_hacker.core.models import Result, Target
 from vibee_hacker.core.plugin_loader import PluginLoader
 
 console = Console()
 
-PROFILES: dict[str, dict] = {
-    "stealth":    {"concurrency": 2,  "timeout": 30,  "safe_mode": True},
-    "default":    {"concurrency": 10, "timeout": 60,  "safe_mode": True},
-    "aggressive": {"concurrency": 50, "timeout": 120, "safe_mode": False},
-    "ci":         {"concurrency": 5,  "timeout": 30,  "safe_mode": True},
-}
+# Apply saved config on import (env vars from ~/.vibee-hacker/config.json)
+apply_saved_config()
 
 
 @click.group()
@@ -66,11 +63,16 @@ def cli():
 @click.option("--cookie", type=str, default=None, help="Cookie header (e.g., 'session=abc123')")
 @click.option("--header", "extra_headers", type=str, multiple=True, help="Extra header (repeatable, e.g., 'Authorization: Bearer token')")
 @click.option("--policy", type=str, default=None, help="Scan policy name or YAML/JSON file path")
+@click.option("--llm-enhance", is_flag=True, help="Enhance results with LLM analysis (requires VIBEE_LLM)")
+@click.option("--skills", type=str, default=None, help="Comma-separated skill names for LLM context (e.g., xss,sqli)")
+@click.option("--agent", is_flag=True, help="Agentic mode: LLM autonomously selects plugins and explores (requires VIBEE_LLM)")
+@click.option("--agent-iterations", default=30, type=int, help="Max iterations for agentic mode (default: 30)")
 def scan(
     target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet,
     proxy, safe_mode, concurrency, delay, insecure, profile,
     save_session, resume, baseline, false_positive,
-    targets_file, cookie, extra_headers, policy,
+    targets_file, cookie, extra_headers, policy, llm_enhance, skills,
+    agent, agent_iterations,
 ):
     """Run a security scan against a target."""
     # Apply profile presets first; explicit flags override them
@@ -79,14 +81,15 @@ def scan(
     effective_safe_mode = safe_mode
 
     if profile:
-        preset = PROFILES[profile]
-        ctx = click.get_current_context()
-        if ctx.get_parameter_source("timeout") == click.core.ParameterSource.DEFAULT:
-            effective_timeout = preset["timeout"]
-        if ctx.get_parameter_source("concurrency") == click.core.ParameterSource.DEFAULT:
-            effective_concurrency = preset["concurrency"]
-        if ctx.get_parameter_source("safe_mode") == click.core.ParameterSource.DEFAULT:
-            effective_safe_mode = preset["safe_mode"]
+        preset = Config.get_profile(profile)
+        if preset:
+            ctx = click.get_current_context()
+            if ctx.get_parameter_source("timeout") == click.core.ParameterSource.DEFAULT:
+                effective_timeout = int(preset["vibee_timeout"])
+            if ctx.get_parameter_source("concurrency") == click.core.ParameterSource.DEFAULT:
+                effective_concurrency = int(preset["vibee_concurrency"])
+            if ctx.get_parameter_source("safe_mode") == click.core.ParameterSource.DEFAULT:
+                effective_safe_mode = preset["vibee_safe_mode"].lower() in ("true", "1", "yes")
 
     verify_ssl = not insecure
 
@@ -119,13 +122,109 @@ def scan(
     else:
         t = Target(path=target, mode=mode, verify_ssl=verify_ssl, proxy=proxy, delay=delay)
 
+    # --- Agentic mode: LLM-driven autonomous scanning ---
+    if agent:
+        from vibee_hacker.llm.config import LLMConfig
+        llm_config = LLMConfig.from_config()
+        if not llm_config.is_configured:
+            console.print("[red]Error: --agent requires VIBEE_LLM to be set.[/red]")
+            console.print("[dim]Example: export VIBEE_LLM=anthropic/claude-sonnet-4-20250514[/dim]")
+            raise SystemExit(1)
+
+        from vibee_hacker.core.agent_scanner import AgentScanner
+        from vibee_hacker.telemetry import Tracer
+
+        tracer = Tracer()
+        scanner = AgentScanner(
+            llm_config=llm_config,
+            timeout_per_plugin=effective_timeout,
+            max_concurrency=effective_concurrency,
+            safe_mode=effective_safe_mode,
+            max_iterations=agent_iterations,
+            tracer=tracer,
+        )
+
+        if not quiet:
+            console.print(f"[bold cyan]VIBEE-Hacker Agent Mode[/bold cyan]")
+            console.print(f"[cyan]Target: {target} | Mode: {mode} | Max iterations: {agent_iterations}[/cyan]")
+            console.print(f"[cyan]LLM: {llm_config.model_name}[/cyan]")
+            console.print("[dim]The LLM will autonomously select plugins and explore...[/dim]\n")
+
+        agent_result = asyncio.run(scanner.scan(t))
+
+        if not quiet:
+            console.print(f"\n[bold green]Agent Scan Complete[/bold green]")
+            console.print(f"[cyan]Iterations: {agent_result.iterations_used} | "
+                          f"Plugins: {len(agent_result.plugins_run)} | "
+                          f"Findings: {len(agent_result.findings)}[/cyan]")
+            console.print(f"[cyan]Risk: {agent_result.risk_rating.upper()}[/cyan]")
+            if agent_result.llm_stats:
+                console.print(f"[dim]{agent_result.llm_stats}[/dim]")
+            console.print(f"\n[bold]Executive Summary:[/bold]\n{agent_result.summary}")
+            if agent_result.exploit_chains:
+                console.print(f"\n[bold red]Exploit Chains:[/bold red]")
+                for chain in agent_result.exploit_chains:
+                    console.print(f"  - {chain}")
+            if agent_result.priority_fixes:
+                console.print(f"\n[bold yellow]Priority Fixes:[/bold yellow]")
+                for fix in agent_result.priority_fixes:
+                    console.print(f"  - {fix}")
+
+        results = agent_result.findings
+
+        if output:
+            import json as json_mod
+            if fmt == "json":
+                with open(output, "w") as f:
+                    json_mod.dump(agent_result.to_dict(), f, indent=2, default=str)
+            else:
+                # Use standard reporters for other formats
+                if fmt == "html":
+                    from vibee_hacker.reports.html_report import HtmlReporter
+                    HtmlReporter().generate(results, t, output)
+                elif fmt == "sarif":
+                    from vibee_hacker.reports.sarif_report import SarifReporter
+                    SarifReporter().generate(results, t, output)
+                elif fmt == "pdf":
+                    from vibee_hacker.reports.pdf_report import PdfReporter
+                    PdfReporter().generate(results, t, output)
+            if not quiet:
+                console.print(f"[green]Results saved to {output}[/green]")
+
+        if not quiet:
+            _print_summary(results)
+
+        if fail_on:
+            levels = [s.strip().upper() for s in fail_on.split(",")]
+            for r in results:
+                if str(r.context_severity).upper() in levels:
+                    sys.exit(1)
+        return
+
+    # --- Standard mode: rule-based scanning ---
     loader = PluginLoader()
     loader.load_builtin()
+
+    # Initialize telemetry tracer
+    from vibee_hacker.telemetry import Tracer
+    tracer = Tracer()
+
+    # Set up live display callbacks (when not quiet)
+    live_display = None
+    if not quiet:
+        from vibee_hacker.cli.live_display import LiveScanDisplay
+        live_display = LiveScanDisplay(console=console)
+        display_target = target[:60] + "..." if len(target) > 60 else target
+        live_display.set_scan_info(display_target, mode, len(loader.plugins))
+        tracer.on_plugin_start = live_display.on_plugin_start
+        tracer.on_plugin_complete = live_display.on_plugin_complete
+        tracer.on_finding = live_display.on_finding
 
     engine = ScanEngine(
         timeout_per_plugin=effective_timeout,
         max_concurrency=effective_concurrency,
         safe_mode=effective_safe_mode,
+        tracer=tracer,
     )
     for p in loader.plugins:
         engine.register_plugin(p)
@@ -155,7 +254,12 @@ def scan(
             console.print(f"[red]Failed to load session: {exc}[/red]")
             raise SystemExit(1)
 
-    results = asyncio.run(engine.scan(t, phases=phases, plugins=plugin_names))
+    # Run scan with optional live display
+    if live_display:
+        with live_display.start():
+            results = asyncio.run(engine.scan(t, phases=phases, plugins=plugin_names))
+    else:
+        results = asyncio.run(engine.scan(t, phases=phases, plugins=plugin_names))
 
     # P2-4: Baseline diff — filter out findings already in a previous report
     if baseline:
@@ -236,6 +340,55 @@ def scan(
         path = sm.save(active_session)
         if not quiet:
             console.print(f"[green]Session saved to {path}[/green]")
+
+    # LLM enhancement: generate context-aware autofix suggestions
+    if llm_enhance:
+        from vibee_hacker.llm.config import LLMConfig
+        llm_config = LLMConfig.from_config()
+        if not llm_config.is_configured:
+            if not quiet:
+                console.print("[yellow]Warning: VIBEE_LLM not set. Skipping LLM enhancement.[/yellow]")
+                console.print("[dim]Set VIBEE_LLM=<model> and VIBEE_LLM_API_KEY=<key> to enable.[/dim]")
+        else:
+            from vibee_hacker.llm import LLM
+            from vibee_hacker.core.autofix import LLMAutofixEngine
+            llm = LLM(llm_config)
+            # Load skills into LLM system prompt
+            if skills:
+                from vibee_hacker.skills import generate_skills_description, validate_skill_names
+                skill_names = [s.strip() for s in skills.split(",")]
+                valid, invalid = validate_skill_names(skill_names)
+                if invalid and not quiet:
+                    console.print(f"[yellow]Unknown skills: {', '.join(invalid)}[/yellow]")
+                if valid:
+                    skills_desc = generate_skills_description(valid)
+                    llm.set_system_prompt(skills_desc)
+                    if not quiet:
+                        console.print(f"[cyan]Loaded skills: {', '.join(valid)}[/cyan]")
+            if llm.is_available:
+                if not quiet:
+                    console.print("[cyan]Enhancing results with LLM analysis...[/cyan]")
+                autofix = LLMAutofixEngine(llm=llm)
+
+                async def _enhance_results():
+                    for r in results[:10]:  # Limit to top 10 findings
+                        if r.recommendation.strip():
+                            continue
+                        fix_text = await autofix.get_llm_fix(
+                            rule_id=r.rule_id,
+                            title=r.title,
+                            description=r.description,
+                            evidence=r.evidence,
+                        )
+                        if fix_text:
+                            r.recommendation = fix_text
+
+                asyncio.run(_enhance_results())
+                if not quiet:
+                    console.print(f"[green]LLM enhancement complete. {llm.stats.to_summary()}[/green]")
+            else:
+                if not quiet:
+                    console.print("[yellow]Warning: litellm not installed. Run: pip install litellm[/yellow]")
 
     if output:
         if fmt == "html":

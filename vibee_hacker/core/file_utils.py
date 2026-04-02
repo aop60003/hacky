@@ -1,4 +1,6 @@
 """Shared utilities for whitebox file scanning plugins."""
+from __future__ import annotations
+
 from pathlib import Path
 
 SKIP_DIRS = {"node_modules", "venv", ".venv", ".git", "dist", "build", "__pycache__", ".tox", "vendor", "site-packages", ".next", ".nuxt", "target", ".gradle"}

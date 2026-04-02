@@ -2,142 +2,196 @@
 
 ## Project Overview
 
-Python 기반 보안 취약점 점검 도구. 플러그인 아키텍처로 화이트박스(소스코드 분석)와 블랙박스(외부 스캐닝)를 모두 지원.
-CLI + 웹 대시보드 인터페이스, HTML/JSON 리포트 생성.
+Python-based security vulnerability scanner. Plugin architecture supporting both whitebox (source code analysis) and blackbox (external scanning).
+CLI + web dashboard interface, HTML/JSON/SARIF/PDF report generation.
 
 ## Harness Architecture: 3-Agent Pattern
 
-이 프로젝트는 Anthropic의 하네스 디자인 원칙을 따른다.
+This project follows Anthropic's harness design principles.
 
-### 1. Planner (계획자)
+### 1. Planner
 
-- 사용자 요청을 받아 **완전한 기능 사양**으로 확장
-- 고수준 설계에 집중, 세밀한 구현 디테일은 Generator에게 위임
-- 각 기능을 독립적인 **스프린트 단위**로 분할
-- 스프린트 시작 전 **성공 기준(스프린트 계약)**을 먼저 정의
+- Receives user requests and expands them into **complete feature specifications**
+- Focuses on high-level design; delegates implementation details to the Generator
+- Breaks each feature into independent **sprint units**
+- Defines **success criteria (sprint contract)** before each sprint begins
 
-### 2. Generator (생성자)
+### 2. Generator
 
-- 한 번에 하나의 스프린트(기능)만 구현
-- 스프린트 완료 후 반드시 Evaluator에게 핸드오프
-- 자기 자신의 코드를 평가하지 않는다 (자체 평가의 한계)
+- Implements only one sprint (feature) at a time
+- Must hand off to the Evaluator after sprint completion
+- Does not evaluate its own code (limitation of self-assessment)
 
-### 3. Evaluator (평가자)
+### 3. Evaluator
 
-- Generator의 결과물을 **독립적으로** 검증
-- 스프린트 계약 기준으로 pass/fail 판정
-- 검증 방법: 테스트 실행, 실제 스캔 동작 확인, 코드 리뷰
-- 실패 시 구체적인 피드백과 함께 Generator에게 반환
+- **Independently** verifies the Generator's output
+- Makes pass/fail decisions based on the sprint contract
+- Verification methods: test execution, actual scan behavior, code review
+- On failure, returns to the Generator with specific feedback
 
 ## Sprint Workflow
 
 ```
-1. Planner: 스프린트 범위 정의 + 성공 기준 작성
-2. Generator: 코드 구현 (하나의 기능/플러그인)
-3. Evaluator: 성공 기준 기반 검증
-   - Pass → 다음 스프린트로
-   - Fail → 피드백과 함께 Generator로 반환
-4. 반복
+1. Planner: Define sprint scope + write success criteria
+2. Generator: Implement code (one feature/plugin)
+3. Evaluator: Verify against success criteria
+   - Pass → Move to next sprint
+   - Fail → Return to Generator with feedback
+4. Repeat
 ```
 
 ## Context Management
 
-### 컨텍스트 리셋 전략
+### Context Reset Strategy
 
-- 컨텍스트가 길어지면 **압축이 아닌 리셋**을 선호
-- 리셋 시 반드시 **구조화된 핸드오프 아티팩트** 작성:
-  - 현재까지 완료된 것
-  - 다음에 해야 할 것
-  - 알려진 이슈/결정사항
-- 핸드오프 아티팩트는 `docs/handoff/` 에 저장
+- Prefer **reset over compression** when context grows long
+- Always write a **structured handoff artifact** on reset:
+  - What has been completed so far
+  - What needs to be done next
+  - Known issues and decisions
+- Store handoff artifacts in `docs/handoff/`
 
-### 컨텍스트 불안감 방지
+### Context Anxiety Prevention
 
-- 작업을 조기에 완료하려는 충동에 저항
-- 스프린트 계약의 모든 기준이 충족될 때까지 완료로 표시하지 않음
+- Resist the urge to mark work as complete prematurely
+- Do not mark a sprint as done until all contract criteria are met
 
-## Evaluator Rubric (평가 기준)
+## Evaluator Rubric
 
-### 코드 품질
+### Code Quality
 
-- 플러그인 인터페이스(PluginBase)를 올바르게 구현하는가
-- 에러 처리가 적절한가 (타임아웃, 네트워크 실패 등)
-- 타입 힌트가 일관적인가
+- Does it correctly implement the plugin interface (PluginBase)?
+- Is error handling adequate (timeouts, network failures, etc.)?
+- Are type hints consistent?
 
-### 기능성
+### Functionality
 
-- 플러그인이 실제로 취약점을 탐지하는가 (테스트 케이스 통과)
-- CLI에서 정상 동작하는가
-- 리포트가 올바르게 생성되는가
+- Does the plugin actually detect vulnerabilities (test cases pass)?
+- Does it work correctly from the CLI?
+- Are reports generated correctly?
 
-### 보안
+### Security
 
-- 도구 자체에 보안 취약점이 없는가
-- 사용자 입력이 적절히 검증되는가
-- 스캔 대상 외의 시스템에 영향을 주지 않는가
+- Is the tool itself free of security vulnerabilities?
+- Is user input properly validated?
+- Does it avoid affecting systems outside the scan target?
 
 ## Development Rules
 
-### 스프린트 계약 우선
+### Sprint Contract First
 
-코드를 작성하기 **전에** 항상 스프린트 계약을 정의한다:
-- 이 스프린트에서 구현할 것
-- 성공으로 간주되는 조건 (구체적, 검증 가능)
-- 범위 밖인 것
+Always define the sprint contract **before** writing code:
+- What this sprint will implement
+- Conditions for success (specific, verifiable)
+- What is out of scope
 
-### 플러그인 개발 규칙
+### Plugin Development Rules
 
-- 모든 플러그인은 `PluginBase`를 상속
-- 플러그인 하나 = 파일 하나
-- `is_applicable()`로 적용 가능 여부 판단
-- `run()`은 `list[Result]`를 반환
-- 플러그인 간 의존성 금지 (독립 실행 보장)
+- All plugins inherit from `PluginBase`
+- One plugin = one file
+- `is_applicable()` determines applicability
+- `run()` returns `list[Result]`
+- No inter-plugin dependencies (guaranteed independent execution)
 
-### 테스트
+### Testing
 
-- 각 플러그인에 대해 최소 1개의 탐지 테스트 + 1개의 비탐지 테스트
-- 블랙박스 플러그인은 mock 서버로 테스트
-- 화이트박스 플러그인은 취약한 샘플 코드로 테스트
-- `pytest` 사용
+- At least 1 detection test + 1 non-detection test per plugin
+- Blackbox plugins tested with mock servers
+- Whitebox plugins tested with vulnerable sample code
+- Use `pytest`
 
-### 반복적 단순화
+### Iterative Simplification
 
-- 모든 하네스 구성요소는 "모델이 독립적으로 수행할 수 없는 것"에 대한 가정
-- 정기적으로 재평가: 더 이상 필요 없는 스캐폴딩은 제거
-- 가장 간단한 솔루션을 찾고, 필요할 때만 복잡성 증가
+- Every harness component is an assumption about "what the model cannot do independently"
+- Re-evaluate regularly: remove scaffolding that is no longer needed
+- Find the simplest solution; increase complexity only when necessary
+
+## Work Discipline
+
+### Pre-Work
+
+- Before refactoring any file >300 LOC, first remove all dead code, unused imports, and debug logs. Commit this cleanup separately.
+- Never attempt multi-file refactors in a single pass. Break into explicit phases, touching no more than 5 files per phase.
+- Plan and implementation are separate steps. When asked to "plan," output only the plan. Write code only after approval.
+- For non-trivial features (3+ steps or architectural decisions), write a detailed spec and reach agreement before implementing.
+
+### Code Quality Standards
+
+- **Forced Verification**: Never report a task as complete until the type checker, linter, and test suite have all been run. Never say "Done!" with errors outstanding.
+- **Senior Standard**: If architecture is flawed, state is duplicated, or patterns are inconsistent, propose and implement structural fixes.
+- **No Over-Engineering**: Do not design for imaginary scenarios nobody asked for. Simple and correct beats elaborate and speculative.
+- **Demand Elegance**: For non-trivial changes, ask "is there a cleaner way?" If a fix feels hacky, implement the clean solution.
+
+### Context Decay Prevention
+
+- After 10+ messages in a conversation, MUST re-read any file before editing it. Do not trust memory of file contents.
+- If context degradation is detected (forgetting file structures, referencing nonexistent variables), run `/compact` proactively.
+- For tasks touching 5+ independent files, distribute work across sub-agents in parallel.
+
+### Edit Safety
+
+- Re-read the file before every edit. Read it again after editing to confirm the change applied correctly.
+- When renaming any function/type/variable, grep for: direct calls, type references, string literals, dynamic imports, and test files. Do not assume a single grep caught everything.
+- Never delete a file without verifying nothing references it. Never push to a shared repository without explicit instruction.
+
+### File System Usage
+
+- Do not blindly dump large files into context. Use bash grep/search to selectively read only what is needed.
+- Write intermediate results to files. Work across multiple passes grounded in reproducible data.
+- When debugging, save logs and outputs to files for verification against reproducible artifacts.
+
+### Self-Improvement
+
+- After any user correction, log the pattern to `gotchas.md` and convert it into a rule that prevents the same category of error.
+- After fixing a bug, explain why it happened and whether anything can prevent that category of bug in the future.
+- If a fix fails after 2 attempts, stop. Re-read the entire relevant section top-down and identify where the mental model was wrong.
+- When the user says "rethink" or "we're going in circles," drop everything and propose a fundamentally different approach.
+
+### Housekeeping
+
+- When given a bug report, just fix it. Trace logs, errors, and failing tests, then resolve. Zero hand-holding required.
+- Offer to checkpoint before risky changes. If a file gets long enough to be hard to reason about, suggest splitting it.
 
 ## Tech Stack
 
-- **Language**: Python 3.11+
+- **Language**: Python 3.10+
 - **CLI**: Click
 - **Web**: FastAPI + Jinja2 templates
-- **Async**: asyncio (플러그인 병렬 실행)
+- **Async**: asyncio (parallel plugin execution)
 - **Testing**: pytest + pytest-asyncio
-- **HTTP**: httpx (async 지원)
-- **Reports**: HTML (Jinja2), JSON
+- **HTTP**: httpx (async support)
+- **Models**: Pydantic v2
+- **LLM**: litellm (optional, multi-provider)
+- **Reports**: HTML (Jinja2), JSON, SARIF, PDF
+- **Telemetry**: JSONL event tracing
 
 ## Project Structure
 
 ```
 vibee-hacker/
 ├── vibee_hacker/
-│   ├── core/
-│   │   ├── engine.py
-│   │   ├── plugin_base.py
-│   │   ├── target.py
-│   │   └── result.py
+│   ├── core/           # Engine, models, state management
+│   │   ├── engine.py        # ScanEngine — plugin execution orchestration
+│   │   ├── plugin_base.py   # PluginBase — plugin interface
+│   │   ├── models.py        # Target, Result, InterPhaseContext (Pydantic)
+│   │   ├── state.py         # ScanState — scan lifecycle state machine
+│   │   ├── orchestrator.py  # ScanOrchestrator — state-managed scan execution
+│   │   ├── autofix.py       # AutofixEngine + LLMAutofixEngine
+│   │   └── crawler.py       # Web crawler
 │   ├── plugins/
-│   │   ├── blackbox/
-│   │   └── whitebox/
-│   ├── cli/
-│   │   └── main.py
-│   ├── web/
-│   │   ├── app.py
-│   │   ├── templates/
-│   │   └── static/
-│   └── reports/
-│       ├── html_report.py
-│       └── json_report.py
+│   │   ├── blackbox/   # 85 DAST plugins
+│   │   └── whitebox/   # 50 SAST plugins
+│   ├── config/         # Config management (ENV → file → default)
+│   ├── llm/            # LLM integration (litellm, streaming, cost tracking)
+│   ├── telemetry/      # JSONL event tracing
+│   ├── skills/         # Security knowledge packages (Markdown)
+│   │   ├── vulnerabilities/  # xss, sqli, ssrf, cmdi, idor
+│   │   ├── technologies/     # wordpress, graphql, jwt
+│   │   └── protocols/        # http, tls
+│   ├── tools/          # Tool registry for LLM agent
+│   ├── cli/            # Click CLI + Rich Live display
+│   ├── web/            # FastAPI dashboard
+│   └── reports/        # JSON, HTML, SARIF, PDF reporters
 ├── tests/
 ├── docs/
 │   ├── handoff/
