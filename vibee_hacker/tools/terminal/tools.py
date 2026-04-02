@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shlex
 from typing import Dict, Optional
 
@@ -43,6 +44,14 @@ _ALLOWED_COMMANDS = frozenset({
 MAX_OUTPUT_SIZE = 50_000  # chars
 
 
+_DANGEROUS_PIPES = frozenset({
+    "nc", "netcat", "ncat", "bash", "sh", "zsh", "dash", "ksh",
+    "python", "python3", "perl", "ruby", "php",
+})
+
+_DANGEROUS_REDIRECTS = ["> /etc/", ">> /etc/", "> /dev/", ">/dev/", ">>/dev/"]
+
+
 def _is_command_allowed(command: str) -> tuple:
     """Check if a command is allowed. Returns (allowed, reason)."""
     try:
@@ -58,8 +67,29 @@ def _is_command_allowed(command: str) -> tuple:
     if base_cmd in _BLOCKED_COMMANDS:
         return False, f"Command '{base_cmd}' is blocked for safety"
 
-    # Allow piped commands if each part is allowed
-    # For simple cases, allow any command not in blocked list
+    # Check for dangerous redirects anywhere in the raw command string
+    for pattern in _DANGEROUS_REDIRECTS:
+        if pattern in command:
+            return False, f"Dangerous redirect: {pattern}"
+
+    # Split by shell operators and validate each segment
+    segments = re.split(r'\s*[|;&]+\s*', command)
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            continue
+        try:
+            seg_parts = shlex.split(segment)
+        except ValueError:
+            continue
+        if not seg_parts:
+            continue
+        seg_cmd = seg_parts[0].split("/")[-1]
+        if seg_cmd in _DANGEROUS_PIPES:
+            return False, f"Dangerous pipe target: {seg_cmd}"
+        if seg_cmd in _BLOCKED_COMMANDS:
+            return False, f"Command '{seg_cmd}' is blocked for safety"
+
     return True, ""
 
 
