@@ -10,18 +10,46 @@ Enables the agent to write and execute Python code for:
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import logging
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from vibee_hacker.tools.registry import register_tool
 
 logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_SIZE = 50_000
+
+BLOCKED_MODULES = {"os", "subprocess", "shutil", "sys", "ctypes", "importlib", "pathlib"}
+BLOCKED_BUILTINS = {"exec", "eval", "compile", "__import__", "open", "breakpoint"}
+
+
+def _validate_code(code: str) -> Tuple[bool, str]:
+    """Validate Python code is safe to execute."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, f"Syntax error: {e}"
+
+    for node in ast.walk(tree):
+        # Block dangerous imports
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            module = node.module if isinstance(node, ast.ImportFrom) else None
+            names = [alias.name for alias in node.names]
+            for name in ([module] if module else []) + names:
+                if name and name.split(".")[0] in BLOCKED_MODULES:
+                    return False, f"Blocked module: {name}"
+
+        # Block dangerous function calls
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in BLOCKED_BUILTINS:
+                return False, f"Blocked builtin: {node.func.id}"
+
+    return True, "OK"
 
 
 @register_tool(
@@ -43,6 +71,11 @@ async def python_execute(
     """
     if not code.strip():
         return {"error": "Empty code", "exit_code": -1}
+
+    # Validate code safety before execution
+    is_safe, reason = _validate_code(code)
+    if not is_safe:
+        return {"error": f"Code validation failed: {reason}", "exit_code": -1}
 
     logger.info("Python executing: %s...", code[:100])
 
