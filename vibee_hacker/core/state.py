@@ -15,6 +15,15 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 
+# Valid state transitions
+VALID_TRANSITIONS: Dict[str, set] = {
+    "idle": {"running"},
+    "running": {"paused", "completed", "failed"},
+    "paused": {"running", "failed"},
+    "completed": set(),  # terminal
+    "failed": set(),     # terminal
+}
+
 
 class ScanState(BaseModel):
     """State machine for scan execution lifecycle."""
@@ -30,6 +39,9 @@ class ScanState(BaseModel):
     iteration: int = 0
     max_iterations: int = 10
     phase: int = 0
+
+    # Formal status for state-machine transitions
+    status: str = "idle"
 
     # Status flags
     completed: bool = False
@@ -138,6 +150,24 @@ class ScanState(BaseModel):
         if self.total_plugins <= 0:
             return 0.0
         return len(self.completed_plugins) / self.total_plugins * 100
+
+    def set_status(self, new_status: str) -> None:
+        """Set status with transition validation."""
+        current = self.status
+        valid_next = VALID_TRANSITIONS.get(current, set())
+        if new_status not in valid_next:
+            raise ValueError(f"Invalid transition: {current} -> {new_status}")
+        self.status = new_status
+
+    @classmethod
+    def get_state_diagram(cls) -> str:
+        """Return human-readable state transition diagram."""
+        return """
+    idle → running → completed
+                   → failed
+                   → paused → running
+                            → failed
+    """
 
     def get_summary(self) -> Dict[str, Any]:
         """Get execution summary."""
