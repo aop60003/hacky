@@ -51,6 +51,11 @@ class Repeater:
 
     async def send(self, request: RepeaterRequest, label: str = "") -> RepeaterResponse:
         """Send a request and return the response."""
+        headers = dict(request.headers)
+        if request.cookies:
+            cookie_header = "; ".join(f"{k}={v}" for k, v in request.cookies.items())
+            headers["Cookie"] = cookie_header
+
         async with httpx.AsyncClient(
             verify=self.verify_ssl,
             proxy=self.proxy,
@@ -61,9 +66,8 @@ class Repeater:
                 resp = await client.request(
                     method=request.method,
                     url=request.url,
-                    headers=request.headers,
+                    headers=headers,
                     content=request.body if request.body else None,
-                    cookies=request.cookies,
                 )
 
                 response = RepeaterResponse(
