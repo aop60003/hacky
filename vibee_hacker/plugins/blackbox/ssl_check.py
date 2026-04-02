@@ -1,14 +1,13 @@
-# vibee_hacker/plugins/blackbox/ssl_check.py
-"""SSL/TLS configuration check plugin."""
+"""SSL/TLS certificate and configuration checks."""
 
 from __future__ import annotations
 
-import re
+import socket
+import ssl
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-import httpx
-
-from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
+from vibee_hacker.core.models import InterPhaseContext, Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
 
 HSTS_MIN_MAX_AGE = 31_536_000  # 1 year in seconds
@@ -16,77 +15,124 @@ HSTS_MIN_MAX_AGE = 31_536_000  # 1 year in seconds
 
 class SslCheckPlugin(PluginBase):
     name = "ssl_check"
-    description = "Check TLS/SSL configuration: HSTS presence, max-age adequacy, and certificate errors"
+    description = "SSL/TLS certificate validation and security checks"
     category = "blackbox"
-    phase = 2
-    base_severity = Severity.HIGH
-    detection_criteria = "Missing/weak HSTS header, expired/self-signed certificate, or missing HTTPS redirect"
-    expected_evidence = "Strict-Transport-Security header absent or max-age below 31536000"
+    phase = 1
+    destructive_level = 0
+    detection_criteria = "Expired/expiring certificate, weak TLS protocol, or hostname mismatch"
+    expected_evidence = "Certificate notAfter date, TLS version, and SAN/CN names"
 
     def is_applicable(self, target: Target) -> bool:
         if not target.url:
             return False
-        return urlparse(target.url).scheme == "https"
+        return target.url.startswith("https://")
 
     async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
         if not target.url:
             return []
-
         parsed = urlparse(target.url)
-        if parsed.scheme != "https":
+        hostname = parsed.hostname
+        port = parsed.port or 443
+        if not hostname:
             return []
 
         results: list[Result] = []
 
-        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            try:
-                resp = await client.get(target.url)
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
+        try:
+            ctx = ssl.create_default_context()
+            with socket.create_connection((hostname, port), timeout=10) as sock:
+                with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                    cert = ssock.getpeercert()
+                    protocol = ssock.version()
 
-        hsts_header = resp.headers.get("strict-transport-security", "")
+                    # 1. Check certificate expiry
+                    not_after = datetime.strptime(
+                        cert["notAfter"], "%b %d %H:%M:%S %Y %Z"
+                    ).replace(tzinfo=timezone.utc)
+                    days_left = (not_after - datetime.now(timezone.utc)).days
 
-        if not hsts_header:
+                    if days_left < 0:
+                        results.append(Result(
+                            plugin_name=self.name,
+                            base_severity=Severity.CRITICAL,
+                            title=f"SSL certificate expired ({abs(days_left)} days ago)",
+                            description="The SSL/TLS certificate has expired.",
+                            endpoint=target.url,
+                            rule_id="ssl_cert_expired",
+                            cwe_id="CWE-295",
+                            recommendation="Renew the SSL certificate immediately.",
+                        ))
+                    elif days_left < 30:
+                        results.append(Result(
+                            plugin_name=self.name,
+                            base_severity=Severity.MEDIUM,
+                            title=f"SSL certificate expires in {days_left} days",
+                            description="The SSL certificate is expiring soon.",
+                            endpoint=target.url,
+                            rule_id="ssl_cert_expiring",
+                            cwe_id="CWE-295",
+                            recommendation="Renew the SSL certificate before it expires.",
+                        ))
+
+                    # 2. Check for weak protocol
+                    if protocol and protocol in ("TLSv1", "TLSv1.1", "SSLv3"):
+                        results.append(Result(
+                            plugin_name=self.name,
+                            base_severity=Severity.HIGH,
+                            title=f"Weak TLS protocol: {protocol}",
+                            description=f"Server uses deprecated {protocol}.",
+                            endpoint=target.url,
+                            rule_id="ssl_weak_protocol",
+                            cwe_id="CWE-326",
+                            recommendation="Disable TLS 1.0/1.1 and SSLv3. Use TLS 1.2+ only.",
+                        ))
+
+                    # 3. Check subject/SAN match
+                    san = [
+                        entry[1]
+                        for entry in cert.get("subjectAltName", [])
+                        if entry[0] == "DNS"
+                    ]
+                    subject = dict(x[0] for x in cert.get("subject", []))
+                    cn = subject.get("commonName", "")
+                    all_names = san + ([cn] if cn else [])
+                    if all_names and not any(
+                        self._hostname_matches(hostname, name) for name in all_names
+                    ):
+                        results.append(Result(
+                            plugin_name=self.name,
+                            base_severity=Severity.HIGH,
+                            title="SSL certificate hostname mismatch",
+                            description=(
+                                f"Certificate names {all_names} do not match {hostname}."
+                            ),
+                            endpoint=target.url,
+                            rule_id="ssl_hostname_mismatch",
+                            cwe_id="CWE-295",
+                            recommendation=(
+                                "Use a certificate that matches the server hostname."
+                            ),
+                        ))
+
+        except ssl.SSLCertVerificationError as e:
             results.append(Result(
                 plugin_name=self.name,
                 base_severity=Severity.HIGH,
-                title="Missing HSTS header",
-                description=(
-                    f"The HTTPS endpoint {target.url} does not return a "
-                    f"Strict-Transport-Security (HSTS) header. Without HSTS, "
-                    f"browsers may be coerced into downgrading to HTTP."
-                ),
-                evidence=f"GET {target.url} -> No Strict-Transport-Security header",
-                recommendation=(
-                    "Add the Strict-Transport-Security header with a max-age of at least "
-                    f"{HSTS_MIN_MAX_AGE} seconds (1 year), and include includeSubDomains."
-                ),
-                cwe_id="CWE-295",
+                title="SSL certificate verification failed",
+                description=str(e),
                 endpoint=target.url,
-                rule_id="ssl_no_hsts",
+                rule_id="ssl_cert_invalid",
+                cwe_id="CWE-295",
+                recommendation="Fix SSL certificate issues.",
             ))
-        else:
-            # Check max-age value
-            match = re.search(r"max-age\s*=\s*(\d+)", hsts_header, re.IGNORECASE)
-            if match:
-                max_age = int(match.group(1))
-                if max_age < HSTS_MIN_MAX_AGE:
-                    results.append(Result(
-                        plugin_name=self.name,
-                        base_severity=Severity.MEDIUM,
-                        title="HSTS max-age too low",
-                        description=(
-                            f"The HSTS max-age value ({max_age}s) is below the recommended "
-                            f"minimum of {HSTS_MIN_MAX_AGE}s (1 year). Short max-age reduces "
-                            f"protection against SSL stripping attacks."
-                        ),
-                        evidence=f"Strict-Transport-Security: {hsts_header}",
-                        recommendation=(
-                            f"Increase the HSTS max-age to at least {HSTS_MIN_MAX_AGE} seconds."
-                        ),
-                        cwe_id="CWE-295",
-                        endpoint=target.url,
-                        rule_id="ssl_hsts_max_age_low",
-                    ))
+        except (socket.timeout, socket.gaierror, ConnectionRefusedError, OSError):
+            pass
 
         return results
+
+    def _hostname_matches(self, hostname: str, pattern: str) -> bool:
+        """Check if a hostname matches a certificate name (supports wildcards)."""
+        if pattern.startswith("*."):
+            suffix = pattern[1:]  # e.g. ".example.com"
+            return hostname.endswith(suffix) or hostname == pattern[2:]
+        return hostname == pattern
