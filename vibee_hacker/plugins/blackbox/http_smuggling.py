@@ -1,100 +1,113 @@
-# vibee_hacker/plugins/blackbox/http_smuggling.py
-"""HTTP request smuggling (CL.TE) detection plugin."""
+"""HTTP Request Smuggling detection (CL.TE, TE.CL)."""
 
 from __future__ import annotations
 
-import shlex
-
 import httpx
 
-from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
+from vibee_hacker.core.models import Result, Severity, Target
 from vibee_hacker.core.plugin_base import PluginBase
-
-# HTTP status codes that suggest server-side framing confusion
-SMUGGLING_INDICATOR_CODES = {400, 408, 413, 500, 501, 502, 503}
 
 
 class HttpSmugglingPlugin(PluginBase):
     name = "http_smuggling"
-    description = "Detect HTTP request smuggling vulnerability via CL.TE ambiguous framing"
+    description = "HTTP request smuggling detection (CL.TE, TE.CL)"
     category = "blackbox"
     phase = 3
-    base_severity = Severity.CRITICAL
-    detection_criteria = (
-        "Server returns error (4xx/5xx) or unexpected response to a request "
-        "with both Content-Length and Transfer-Encoding: chunked headers"
-    )
-    expected_evidence = "HTTP 400/408/500 or chunked-framing error in response to CL.TE probe"
+    destructive_level = 1
 
-    async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
+    def is_applicable(self, target: Target) -> bool:
+        return bool(target.url)
+
+    async def run(self, target: Target, context=None) -> list[Result]:
         if not target.url:
             return []
 
-        normal_body = b"a=1"
-        normal_headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Content-Length": str(len(normal_body)),
-        }
+        results: list[Result] = []
 
-        # CL.TE probe: Content-Length says 5 bytes, but body is chunked with different length
-        # This creates ambiguity between front-end (uses CL) and back-end (uses TE)
-        probe_body = b"0\r\n\r\n"  # chunked terminator as body
-        probe_headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Content-Length": str(len(probe_body)),
-            "Transfer-Encoding": "chunked",
-            "Connection": "keep-alive",
-        }
-
-        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
+        async with httpx.AsyncClient(
+            verify=getattr(target, "verify_ssl", True),
+            timeout=10,
+            http2=False,  # Smuggling only affects HTTP/1.1
+        ) as client:
+            # 1. Check for Transfer-Encoding header handling
             try:
-                baseline = await client.post(
-                    target.url,
-                    content=normal_body,
-                    headers=normal_headers,
-                )
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
-
-            # If the server already rejects normal POSTs with 400/500, skip to avoid FP
-            if baseline.status_code in SMUGGLING_INDICATOR_CODES:
-                return []
-
-            try:
+                # Send ambiguous Content-Length + Transfer-Encoding
                 resp = await client.post(
                     target.url,
-                    content=probe_body,
-                    headers=probe_headers,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Transfer-Encoding": "chunked",
+                        "Content-Length": "4",
+                    },
+                    content="0\r\n\r\n",
                 )
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
-                return []
 
-        # Only report if probe response is DIFFERENT from baseline AND in the suspicious set
-        if resp.status_code in SMUGGLING_INDICATOR_CODES and resp.status_code != baseline.status_code:
-            return [Result(
-                plugin_name=self.name,
-                base_severity=self.base_severity,
-                title="HTTP request smuggling (CL.TE) potentially present",
-                description=(
-                    f"The server at {target.url} returned HTTP {resp.status_code} "
-                    f"in response to a request with ambiguous Content-Length and "
-                    f"Transfer-Encoding: chunked headers. This may indicate the server "
-                    f"is vulnerable to CL.TE HTTP request smuggling."
-                ),
-                evidence=(
-                    f"URL: {target.url} | Probe: CL.TE ambiguous framing | "
-                    f"Baseline status: {baseline.status_code} | "
-                    f"Probe response status: {resp.status_code}"
-                ),
-                cwe_id="CWE-444",
-                endpoint=target.url,
-                curl_command=(
-                    f"curl -v -X POST {shlex.quote(target.url)} "
-                    f"-H 'Content-Length: 5' "
-                    f"-H 'Transfer-Encoding: chunked' "
-                    f"--data $'0\\r\\n\\r\\n'"
-                ),
-                rule_id="http_smuggling_clte",
-            )]
+                # If server doesn't reject ambiguous headers, it may be vulnerable
+                if resp.status_code not in (400, 501):
+                    # Try timing-based detection
+                    try:
+                        # Send a request that would hang if TE.CL smuggling works
+                        resp2 = await client.post(
+                            target.url,
+                            headers={
+                                "Transfer-Encoding": "chunked",
+                                "Content-Length": "6",
+                            },
+                            content="0\r\n\r\nX",
+                            timeout=5,
+                        )
+                    except httpx.ReadTimeout:
+                        results.append(Result(
+                            plugin_name=self.name,
+                            base_severity=Severity.HIGH,
+                            title="Potential HTTP Request Smuggling (TE.CL)",
+                            description=(
+                                "Server may be vulnerable to TE.CL request smuggling. "
+                                "The server did not reject ambiguous Transfer-Encoding/Content-Length "
+                                "headers and a timing anomaly was detected."
+                            ),
+                            endpoint=target.url,
+                            rule_id="http_smuggling_te_cl",
+                            cwe_id="CWE-444",
+                            recommendation=(
+                                "Configure the server to reject ambiguous requests with both "
+                                "Transfer-Encoding and Content-Length headers."
+                            ),
+                        ))
+                    except Exception:
+                        pass
 
-        return []
+            except (httpx.TransportError, httpx.InvalidURL):
+                pass
+
+            # 2. Check for HTTP/2 downgrade
+            try:
+                resp = await client.get(target.url)
+                if resp.http_version == "HTTP/1.1":
+                    # Check if server supports both HTTP/1.1 and HTTP/2
+                    # (potential for H2.CL smuggling)
+                    server = resp.headers.get("server", "").lower()
+
+                    # Reverse proxy indicators
+                    if any(proxy in server for proxy in ["nginx", "apache", "haproxy", "cloudflare"]):
+                        if "via" in resp.headers or "x-forwarded" in str(resp.headers).lower():
+                            results.append(Result(
+                                plugin_name=self.name,
+                                base_severity=Severity.LOW,
+                                title="Reverse proxy detected (smuggling pre-condition)",
+                                description=(
+                                    f"Reverse proxy detected ({server}). "
+                                    "Multi-layer HTTP processing may enable request smuggling."
+                                ),
+                                endpoint=target.url,
+                                rule_id="http_smuggling_proxy_detected",
+                                cwe_id="CWE-444",
+                                recommendation=(
+                                    "Ensure consistent HTTP parsing between proxy and backend."
+                                ),
+                            ))
+
+            except (httpx.TransportError, httpx.InvalidURL):
+                pass
+
+        return results

@@ -1,88 +1,115 @@
-# tests/plugins/blackbox/test_http_smuggling.py
-"""Tests for HTTP request smuggling detection plugin."""
+"""Tests for HTTP Request Smuggling detection plugin."""
+
+from __future__ import annotations
+
 import pytest
 import httpx
-from vibee_hacker.plugins.blackbox.http_smuggling import HttpSmugglingPlugin
+
 from vibee_hacker.core.models import Target, Severity
+from vibee_hacker.plugins.blackbox.http_smuggling import HttpSmugglingPlugin
 
 
-class TestHttpSmuggling:
-    @pytest.fixture
-    def plugin(self):
-        return HttpSmugglingPlugin()
+@pytest.fixture
+def plugin():
+    return HttpSmugglingPlugin()
 
-    @pytest.fixture
-    def target(self):
-        return Target(url="http://example.com/")
 
-    @pytest.mark.asyncio
-    async def test_timing_anomaly_detected(self, plugin, target, httpx_mock):
-        """Probe returning 400 when baseline is 200 is reported as CRITICAL."""
-        # Baseline: normal POST returns 200
-        httpx_mock.add_response(
-            url="http://example.com/",
-            status_code=200,
-            text="OK",
-        )
-        # CL.TE probe: server responds with 400 indicating framing confusion
-        httpx_mock.add_response(
-            url="http://example.com/",
-            status_code=400,
-            text="Bad Request: invalid chunk size",
-        )
-        results = await plugin.run(target)
-        assert len(results) >= 1
-        assert results[0].base_severity == Severity.CRITICAL
-        assert results[0].rule_id == "http_smuggling_clte"
-        assert results[0].cwe_id == "CWE-444"
+@pytest.fixture
+def target():
+    return Target(url="http://example.com")
 
-    @pytest.mark.asyncio
-    async def test_normal_200_response_returns_empty(self, plugin, target, httpx_mock):
-        """Normal 200 response to both baseline and probe produces no results."""
-        # Baseline
-        httpx_mock.add_response(
-            url="http://example.com/",
-            status_code=200,
-            text="<html><body>OK</body></html>",
-        )
-        # Probe also 200
-        httpx_mock.add_response(
-            url="http://example.com/",
-            status_code=200,
-            text="<html><body>OK</body></html>",
-        )
-        results = await plugin.run(target)
-        assert results == []
 
-    @pytest.mark.asyncio
-    async def test_baseline_already_400_skipped(self, plugin, target, httpx_mock):
-        """If baseline already returns 400, the probe is skipped to avoid false positives."""
-        # Baseline returns 400 (server rejects all POSTs)
-        httpx_mock.add_response(
-            url="http://example.com/",
-            status_code=400,
-            text="Bad Request",
-        )
-        results = await plugin.run(target)
-        assert results == []
+# ---------------------------------------------------------------------------
+# is_applicable
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.asyncio
-    async def test_transport_error_on_baseline_returns_empty(self, plugin, target, httpx_mock):
-        """Transport error on baseline request is handled gracefully."""
-        httpx_mock.add_exception(httpx.ConnectError("connection refused"))
-        results = await plugin.run(target)
-        assert results == []
+def test_is_applicable(plugin):
+    assert plugin.is_applicable(Target(url="http://example.com")) is True
 
-    @pytest.mark.asyncio
-    async def test_transport_error_on_probe_returns_empty(self, plugin, target, httpx_mock):
-        """Transport error on probe request (after successful baseline) is handled gracefully."""
-        # Baseline succeeds
-        httpx_mock.add_response(
-            url="http://example.com/",
-            status_code=200,
-            text="OK",
-        )
-        # Probe fails
-        httpx_mock.add_exception(httpx.ConnectError("connection refused"))
-        results = await plugin.run(target)
-        assert results == []
+
+def test_not_applicable_no_url(plugin):
+    assert plugin.is_applicable(Target(url=None, path="/code")) is False
+
+
+# ---------------------------------------------------------------------------
+# Ambiguous-header rejection (safe server)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ambiguous_headers_rejected(plugin, target, httpx_mock):
+    """Server returning 400 to ambiguous CL+TE probe produces no smuggling results."""
+    # POST with ambiguous headers → server rejects with 400
+    httpx_mock.add_response(
+        url="http://example.com",
+        method="POST",
+        status_code=400,
+        text="Bad Request",
+    )
+    # GET for proxy detection check
+    httpx_mock.add_response(
+        url="http://example.com",
+        method="GET",
+        status_code=200,
+        headers={"server": "nginx"},
+        text="OK",
+    )
+
+    results = await plugin.run(target)
+    # No smuggling results — server rejected the probe
+    smuggling_results = [r for r in results if r.rule_id == "http_smuggling_te_cl"]
+    assert smuggling_results == []
+
+
+# ---------------------------------------------------------------------------
+# Proxy detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_proxy_detected(plugin, target, httpx_mock):
+    """nginx + x-forwarded-for header triggers LOW severity proxy finding."""
+    # POST probe — server accepts (200), no timeout for timing probe
+    httpx_mock.add_response(
+        url="http://example.com",
+        method="POST",
+        status_code=200,
+        text="OK",
+    )
+    # Second POST (timing probe) — also 200, no timeout
+    httpx_mock.add_response(
+        url="http://example.com",
+        method="POST",
+        status_code=200,
+        text="OK",
+    )
+    # GET for proxy detection
+    httpx_mock.add_response(
+        url="http://example.com",
+        method="GET",
+        status_code=200,
+        headers={
+            "server": "nginx/1.21.0",
+            "x-forwarded-for": "10.0.0.1",
+        },
+        text="OK",
+    )
+
+    results = await plugin.run(target)
+    proxy_results = [r for r in results if r.rule_id == "http_smuggling_proxy_detected"]
+    assert len(proxy_results) >= 1
+    assert proxy_results[0].base_severity == Severity.LOW
+    assert proxy_results[0].cwe_id == "CWE-444"
+
+
+# ---------------------------------------------------------------------------
+# Transport error resilience
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_transport_error_graceful(plugin, target, httpx_mock):
+    """Transport errors on all requests are handled without raising exceptions."""
+    httpx_mock.add_exception(httpx.ConnectError("connection refused"))
+    httpx_mock.add_exception(httpx.ConnectError("connection refused"))
+
+    results = await plugin.run(target)
+    # Should not raise; may return empty or partial results
+    assert isinstance(results, list)
