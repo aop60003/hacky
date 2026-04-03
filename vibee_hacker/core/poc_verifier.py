@@ -42,6 +42,7 @@ class VerificationResult:
 # Verification signatures per vuln type
 VERIFICATION_SIGNATURES: dict[str, dict] = {
     "sqli": {
+        "check": "pattern",
         "success_patterns": [
             r"SQL syntax", r"mysql_fetch", r"ORA-\d+", r"PostgreSQL",
             r"sqlite3\.OperationalError", r"SQLSTATE", r"syntax error",
@@ -60,6 +61,7 @@ VERIFICATION_SIGNATURES: dict[str, dict] = {
         "payload_param": True,
     },
     "cmdi": {
+        "check": "pattern",
         "success_patterns": [
             r"uid=\d+", r"root:", r"www-data", r"bin/bash",
             r"Windows NT", r"SYSTEM",
@@ -68,6 +70,7 @@ VERIFICATION_SIGNATURES: dict[str, dict] = {
         "payload_param": True,
     },
     "ssrf": {
+        "check": "pattern",
         "success_patterns": [
             r"ami-id", r"instance-id", r"iam/security-credentials",
             r"metadata", r"169\.254\.169\.254",
@@ -89,6 +92,7 @@ VERIFICATION_SIGNATURES: dict[str, dict] = {
         "payload_param": True,
     },
     "default_creds": {
+        "check": "pattern",
         "success_patterns": [
             r"dashboard", r"welcome", r"logout", r"admin panel",
         ],
@@ -105,10 +109,9 @@ VERIFICATION_SIGNATURES: dict[str, dict] = {
 class PoCVerifier:
     """Automatically verify PoCs by executing them safely."""
 
-    def __init__(self, timeout: int = 10, verify_ssl: bool = False, max_retries: int = 1):
+    def __init__(self, timeout: int = 10, verify_ssl: bool = False):
         self.timeout = timeout
         self.verify_ssl = verify_ssl
-        self.max_retries = max_retries
 
     async def verify(self, poc: PoC) -> VerificationResult:
         """Verify a single PoC."""
@@ -169,7 +172,7 @@ class PoCVerifier:
                                 response_time_ms=elapsed_ms,
                             )
 
-                elif check_type == "pattern" or "success_patterns" in sigs:
+                elif check_type == "pattern":
                     patterns = sigs.get("success_patterns", [])
                     for pattern in patterns:
                         match = re.search(pattern, body, re.IGNORECASE)
