@@ -103,7 +103,7 @@ Tests live in `tests/` mirroring the source layout:
 
 ## Code Style
 
-- Python 3.11+, type hints required on all public methods.
+- Python 3.10+, type hints required on all public methods.
 - `ruff` for linting: `ruff check vibee_hacker/`
 - No inter-plugin dependencies — each plugin must be independently runnable.
 - Error handling: catch network/timeout errors, return `[]` on non-critical failures, never raise from `run()`.

@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.2.0] - 2026-04-03
+
+### Added
+- Cross-file Taint Tracker (Python AST + JavaScript regex)
+- WebSocket Security Scanner (ws:// discovery, upgrade probe, socket.io)
+- HTTP Request Smuggling Detection (CL.TE, TE.CL, proxy detection)
+- GitHub Release v2.2.0 tag
+- Dockerfile (python:3.12-slim, non-root, Playwright)
+- CI improvements (pip cache, coverage, Docker build job)
+- E2E benchmark: 20/20 BB detection (100%), 85 WB findings, 12s scan
+
+### Fixed
+- Python sandbox hardened (getattr/dunder/attribute blocking, -S -I flags)
+- Terminal pipe validation (segment-by-segment, dangerous redirect blocking)
+- Telemetry body filtering (JWT, AWS keys, passwords, 0o600 permissions)
+- State transition validation with VALID_TRANSITIONS
+- Repeater DeprecationWarning (cookies → header)
+
 ## [2.1.0] - 2026-04-02
 
 ### Added
