@@ -67,12 +67,13 @@ def cli():
 @click.option("--skills", type=str, default=None, help="Comma-separated skill names for LLM context (e.g., xss,sqli)")
 @click.option("--agent", is_flag=True, help="Agentic mode: LLM autonomously selects plugins and explores (requires VIBEE_LLM)")
 @click.option("--agent-iterations", default=30, type=int, help="Max iterations for agentic mode (default: 30)")
+@click.option("--poc", is_flag=True, help="Generate PoC exploits for found vulnerabilities")
 def scan(
     target, mode, phase, plugin, output, fmt, timeout, fail_on, quiet,
     proxy, safe_mode, concurrency, delay, insecure, profile,
     save_session, resume, baseline, false_positive,
     targets_file, cookie, extra_headers, policy, llm_enhance, skills,
-    agent, agent_iterations,
+    agent, agent_iterations, poc,
 ):
     """Run a security scan against a target."""
     # Apply profile presets first; explicit flags override them
@@ -171,6 +172,18 @@ def scan(
                     console.print(f"  - {fix}")
 
         results = agent_result.findings
+
+        if poc:
+            from vibee_hacker.core.poc_generator import PoCGenerator
+            gen = PoCGenerator()
+            pocs = gen.generate_all(results)
+            if pocs:
+                poc_report = gen.generate_report(pocs)
+                poc_path = (output or "poc_report") + ".poc.md"
+                with open(poc_path, "w") as f:
+                    f.write(poc_report)
+                if not quiet:
+                    console.print(f"[red]PoC report: {poc_path} ({len(pocs)} exploits)[/red]")
 
         if output:
             import json as json_mod
@@ -389,6 +402,18 @@ def scan(
             else:
                 if not quiet:
                     console.print("[yellow]Warning: litellm not installed. Run: pip install litellm[/yellow]")
+
+    if poc:
+        from vibee_hacker.core.poc_generator import PoCGenerator
+        gen = PoCGenerator()
+        pocs = gen.generate_all(results)
+        if pocs:
+            poc_report = gen.generate_report(pocs)
+            poc_path = (output or "poc_report") + ".poc.md"
+            with open(poc_path, "w") as f:
+                f.write(poc_report)
+            if not quiet:
+                console.print(f"[red]PoC report: {poc_path} ({len(pocs)} exploits)[/red]")
 
     if output:
         if fmt == "html":
