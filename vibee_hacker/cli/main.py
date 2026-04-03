@@ -180,7 +180,7 @@ def scan(
             if pocs:
                 poc_report = gen.generate_report(pocs)
                 poc_path = (output or "poc_report") + ".poc.md"
-                with open(poc_path, "w") as f:
+                with open(poc_path, "w", encoding="utf-8") as f:
                     f.write(poc_report)
                 if not quiet:
                     console.print(f"[red]PoC report: {poc_path} ({len(pocs)} exploits)[/red]")
@@ -410,7 +410,7 @@ def scan(
         if pocs:
             poc_report = gen.generate_report(pocs)
             poc_path = (output or "poc_report") + ".poc.md"
-            with open(poc_path, "w") as f:
+            with open(poc_path, "w", encoding="utf-8") as f:
                 f.write(poc_report)
             if not quiet:
                 console.print(f"[red]PoC report: {poc_path} ({len(pocs)} exploits)[/red]")
