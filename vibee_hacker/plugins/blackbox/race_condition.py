@@ -1,104 +1,152 @@
-# vibee_hacker/plugins/blackbox/race_condition.py
-"""Race condition detection plugin via concurrent request comparison."""
+"""Race condition detection via concurrent request flooding."""
 
 from __future__ import annotations
 
 import asyncio
-import json
-import re
-import shlex
+import time
+from urllib.parse import urlparse
 
 import httpx
 
-from vibee_hacker.core.models import Target, Result, Severity, InterPhaseContext
 from vibee_hacker.core.plugin_base import PluginBase
-
-RACE_URL_PATTERN = re.compile(r"/order|/transfer|/buy|/redeem|/coupon|/apply", re.I)
-CONCURRENT_REQUESTS = 5
-
-
-def _normalize(text: str) -> str:
-    """Strip dynamic fields before comparing response bodies to avoid FPs."""
-    # Remove timestamps
-    text = re.sub(r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.\d]*Z?', 'TIMESTAMP', text)
-    # Remove UUIDs
-    text = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'UUID', text)
-    # Remove CSRF tokens, nonces, and similar dynamic fields
-    text = re.sub(r'"(?:csrf|nonce|token|_token)":\s*"[^"]*"', '"DYNAMIC":"NORMALIZED"', text)
-    return text
+from vibee_hacker.core.models import Result, Severity, Target, InterPhaseContext
 
 
 class RaceConditionPlugin(PluginBase):
     name = "race_condition"
-    description = "Detect race conditions by sending concurrent identical requests and comparing responses"
+    description = "Detect race conditions via concurrent request analysis"
     category = "blackbox"
     phase = 3
+    destructive_level = 2  # sends many concurrent requests
     base_severity = Severity.HIGH
-    detection_criteria = "Concurrent responses differ (different IDs, amounts) indicating race condition"
-    expected_evidence = "Multiple concurrent requests returned different response bodies"
-    destructive_level = 2
+
+    def is_applicable(self, target: Target) -> bool:
+        return bool(target.url)
 
     async def run(self, target: Target, context: InterPhaseContext | None = None) -> list[Result]:
         if not target.url:
             return []
 
-        if not RACE_URL_PATTERN.search(target.url):
-            return []
+        results = []
 
-        async def send_request(client: httpx.AsyncClient) -> httpx.Response | None:
+        # Collect endpoints to test from context
+        urls_to_test = [target.url]
+        if context:
+            for url in (getattr(context, "crawl_urls", None) or [])[:5]:
+                if url not in urls_to_test:
+                    urls_to_test.append(url)
+
+        async with httpx.AsyncClient(
+            verify=getattr(target, "verify_ssl", True),
+            timeout=10,
+            follow_redirects=True,
+        ) as client:
+            for url in urls_to_test:
+                result = await self._test_race(client, url)
+                if result:
+                    results.append(result)
+                if len(results) >= 5:
+                    break
+
+        return results
+
+    async def _test_race(self, client: httpx.AsyncClient, url: str) -> Result | None:
+        """Send concurrent requests and analyze for race condition indicators."""
+        CONCURRENCY = 10
+
+        # Phase 1: Baseline — single request
+        try:
+            baseline = await client.get(url)
+            baseline_status = baseline.status_code
+        except (httpx.TransportError, httpx.InvalidURL):
+            return None
+
+        # Phase 2: Concurrent burst
+        async def single_request() -> dict | None:
             try:
-                return await client.post(
-                    target.url,
-                    json={"action": "process"},
-                    headers={"Content-Type": "application/json"},
-                )
-            except (httpx.TransportError, httpx.InvalidURL, httpx.DecodingError):
+                start = time.monotonic()
+                resp = await client.get(url)
+                elapsed = time.monotonic() - start
+                return {
+                    "status": resp.status_code,
+                    "length": len(resp.content),
+                    "time": elapsed,
+                    "body": resp.text[:500],
+                }
+            except Exception:
                 return None
 
-        async with httpx.AsyncClient(verify=target.verify_ssl, timeout=10) as client:
-            responses = await asyncio.gather(
-                *[send_request(client) for _ in range(CONCURRENT_REQUESTS)]
+        tasks = [single_request() for _ in range(CONCURRENCY)]
+        burst_results = await asyncio.gather(*tasks)
+        burst_results = [r for r in burst_results if r is not None]
+
+        if len(burst_results) < 3:
+            return None
+
+        # Phase 3: Analyze for anomalies
+        statuses = [r["status"] for r in burst_results]
+        lengths = [r["length"] for r in burst_results]
+        times = [r["time"] for r in burst_results]
+
+        # Check for inconsistent responses (different status codes)
+        unique_statuses = set(statuses)
+        if len(unique_statuses) > 1 and baseline_status in unique_statuses:
+            return Result(
+                plugin_name=self.name,
+                base_severity=Severity.HIGH,
+                title=f"Race condition: inconsistent responses at {urlparse(url).path}",
+                description=(
+                    f"Concurrent requests produced different status codes: {unique_statuses}. "
+                    f"This may indicate a race condition or TOCTOU vulnerability."
+                ),
+                endpoint=url,
+                rule_id="race_condition_status_inconsistency",
+                cwe_id="CWE-362",
+                evidence=f"Statuses: {statuses}",
+                recommendation="Implement proper locking/serialization for state-changing operations.",
             )
 
-        valid_responses = [r for r in responses if r is not None]
-        if len(valid_responses) < 2:
-            return []
+        # Check for significant response length variance (>20% difference)
+        if lengths:
+            avg_length = sum(lengths) / len(lengths)
+            if avg_length > 0:
+                max_diff = max(abs(length - avg_length) for length in lengths)
+                variance_pct = (max_diff / avg_length) * 100
+                if variance_pct > 20:
+                    return Result(
+                        plugin_name=self.name,
+                        base_severity=Severity.MEDIUM,
+                        title=f"Possible race condition: response length variance at {urlparse(url).path}",
+                        description=(
+                            f"Concurrent requests show {variance_pct:.0f}% response length variance. "
+                            f"Average: {avg_length:.0f}, range: {min(lengths)}-{max(lengths)}."
+                        ),
+                        endpoint=url,
+                        rule_id="race_condition_length_variance",
+                        cwe_id="CWE-362",
+                        evidence=f"Lengths: {lengths}",
+                        recommendation="Review endpoint for concurrent access issues.",
+                    )
 
-        # Compare normalized response bodies - if any differ, possible race condition
-        bodies = [_normalize(r.text) for r in valid_responses]
-        unique_bodies = set(bodies)
+        # Check for significant timing anomalies (one request much slower)
+        if times:
+            avg_time = sum(times) / len(times)
+            if avg_time > 0:
+                max_time = max(times)
+                if max_time > avg_time * 3 and max_time > 1.0:
+                    return Result(
+                        plugin_name=self.name,
+                        base_severity=Severity.LOW,
+                        title=f"Timing anomaly under concurrent load at {urlparse(url).path}",
+                        description=(
+                            f"One request took {max_time:.2f}s vs average {avg_time:.2f}s under concurrent load. "
+                            f"May indicate resource contention."
+                        ),
+                        endpoint=url,
+                        rule_id="race_condition_timing_anomaly",
+                        cwe_id="CWE-362",
+                        evidence=f"Times: {[f'{t:.3f}s' for t in times]}",
+                        recommendation="Investigate resource contention under concurrent access.",
+                    )
 
-        if len(unique_bodies) > 1:
-            return [Result(
-                plugin_name=self.name,
-                base_severity=self.base_severity,
-                title="Possible race condition detected",
-                description=(
-                    f"Sending {CONCURRENT_REQUESTS} identical concurrent POST requests to "
-                    f"'{target.url}' produced {len(unique_bodies)} different responses. "
-                    f"This may indicate a race condition allowing duplicate processing, "
-                    f"double-spending, or coupon reuse attacks."
-                ),
-                evidence=(
-                    f"Sent {CONCURRENT_REQUESTS} concurrent requests, "
-                    f"got {len(unique_bodies)} unique responses out of {len(valid_responses)} total"
-                ),
-                recommendation=(
-                    "Implement atomic database transactions and proper locking mechanisms. "
-                    "Use idempotency keys for financial transactions. "
-                    "Apply rate limiting per user for sensitive operations."
-                ),
-                cwe_id="CWE-362",
-                endpoint=target.url,
-                curl_command=(
-                    f"# Send {CONCURRENT_REQUESTS} concurrent requests:\n"
-                    f"for i in $(seq 1 {CONCURRENT_REQUESTS}); do "
-                    f"curl -X POST {shlex.quote(target.url)} "
-                    f"-H 'Content-Type: application/json' "
-                    f"-d '{{\"action\":\"process\"}}' & "
-                    f"done; wait"
-                ),
-                rule_id="race_condition_detected",
-            )]
-
-        return []
+        return None

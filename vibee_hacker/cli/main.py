@@ -184,6 +184,12 @@ def scan(
                     f.write(poc_report)
                 if not quiet:
                     console.print(f"[red]PoC report: {poc_path} ({len(pocs)} exploits)[/red]")
+                from vibee_hacker.core.poc_verifier import PoCVerifier
+                verifier = PoCVerifier(verify_ssl=not insecure)
+                verifications = asyncio.run(verifier.verify_all(pocs))
+                confirmed = sum(1 for v in verifications if v.verified)
+                if not quiet:
+                    console.print(f"[red]PoC verification: {confirmed}/{len(pocs)} confirmed[/red]")
 
         if output:
             import json as json_mod
@@ -414,6 +420,12 @@ def scan(
                 f.write(poc_report)
             if not quiet:
                 console.print(f"[red]PoC report: {poc_path} ({len(pocs)} exploits)[/red]")
+            from vibee_hacker.core.poc_verifier import PoCVerifier
+            verifier = PoCVerifier(verify_ssl=not insecure)
+            verifications = asyncio.run(verifier.verify_all(pocs))
+            confirmed = sum(1 for v in verifications if v.verified)
+            if not quiet:
+                console.print(f"[red]PoC verification: {confirmed}/{len(pocs)} confirmed[/red]")
 
     if output:
         if fmt == "html":
